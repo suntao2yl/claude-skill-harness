@@ -44,6 +44,12 @@ npx skills add suntao2yl/claude-skill-harness
 # Check progress
 /harness status
 
+# Add a feature mid-campaign
+/harness add "spectator mode for matches"
+
+# Skip a feature
+/harness skip F003
+
 # Reset campaign
 /harness reset
 ```

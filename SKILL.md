@@ -13,6 +13,7 @@ allowed-tools:
   - TaskCreate
   - TaskUpdate
   - TaskList
+  - TaskGet
   - AskUserQuestion
 ---
 
@@ -32,10 +33,15 @@ You are a **campaign orchestrator** that manages long-running development goals 
 
 ```
 /harness "goal description"    → Auto-detect phase, execute
+/harness                       → Resume existing campaign (auto-detect phase)
 /harness review                → Manual QA trigger
 /harness status                → Campaign overview
+/harness add "feature desc"    → Add a new feature to an active campaign
+/harness skip F003             → Skip a feature (user decision)
 /harness reset                 → Archive and restart campaign
 ```
+
+If `/harness` is invoked without arguments and no `.harness/` directory exists, ask the user for a goal description before proceeding to INIT.
 
 ---
 
@@ -207,39 +213,36 @@ After implementing a feature, before review:
 
 **This is the critical anti-bias mechanism.** The reviewer is a SEPARATE agent context.
 
-Launch a reviewer agent with this structure:
+Launch a reviewer agent using the **full calibration template** from `resources/reviewer-calibration.md`, filling in the variables from campaign state. In **lite** mode, use the simplified inline prompt below instead.
+
+**Standard/Heavy mode** — read `resources/reviewer-calibration.md`, substitute variables, pass as Agent prompt:
+
+```
+Agent(subagent_type="general-purpose", prompt=<filled reviewer-calibration.md template>)
+```
+
+**Lite mode** — inline simplified prompt:
 
 ```
 Agent(subagent_type="general-purpose", prompt="""
-You are a QA REVIEWER for a software campaign. Your job is to find problems.
+You are a QA REVIEWER. Your job is to find problems, not to reassure.
 
-IMPORTANT CALIBRATION:
-- You have a systematic bias toward leniency. Actively fight it.
-- If you notice a bug but feel tempted to say "it probably works anyway" — that IS a bug. Report it.
-- Check EVERY item in the verification criteria literally. "Close enough" is a failure.
-- Run the actual tests. Read the actual output. Do not assume.
+CALIBRATION: You have a bias toward leniency. Fight it. "Close enough" is a FAIL.
 
 CONTEXT:
 - Campaign goal: {goal}
-- Feature being reviewed: {feature name}
-- Verification criteria (IMMUTABLE): {verification field from features.json}
-- Acceptance checklist (supplementary): {acceptance_checklist from features.json}
+- Feature: {feature name}
+- Verification (IMMUTABLE): {verification}
 - Test command: {test_command}
-- Files changed: {git diff --name-only since feature start}
+- Files changed: {git diff --name-only}
 
-YOUR TASK:
-1. Read the verification criteria AND acceptance checklist carefully. List each testable claim.
-2. Run the test command and report results
-3. If browser testing tools are available (Playwright MCP, Puppeteer MCP), use them to verify user-facing behavior visually — navigate the app, take screenshots as evidence
-4. Read the changed files and check for:
-   - Logic errors
-   - Missing edge cases mentioned in verification
-   - Security issues (injection, XSS, etc.)
-   - Regressions in existing functionality
-5. Give a PASS or FAIL verdict with specific findings
-6. If FAIL, list exact issues that must be fixed
+TASK:
+1. Read verification criteria. List each testable claim.
+2. Run the test command, report results.
+3. Read changed files — check for logic errors, security issues, regressions.
+4. PASS or FAIL with specific findings.
 
-DO NOT rationalize away findings. If something looks wrong, it IS wrong until proven otherwise.
+If something looks wrong, it IS wrong until proven otherwise.
 """)
 ```
 
@@ -255,15 +258,17 @@ DO NOT rationalize away findings. If something looks wrong, it IS wrong until pr
 
 After a feature passes review:
 
-1. **Update features.json**: Set feature status to `done`, record session info:
+1. **Update features.json**: Set feature status to `done`, record session info, and **clean up transient fields**:
    ```json
    {
      "status": "done",
-     "sessions": ["2026-03-27: implemented auth middleware, 3 files changed"]
+     "sessions": ["2026-03-27: implemented auth middleware, 3 files changed"],
+     "checkpoint_notes": null,
+     "acceptance_checklist": null
    }
    ```
 
-2. **Update campaign.json**: Increment `completed_features`, clear `current_feature`
+2. **Update campaign.json**: Increment `completed_features`, clear `current_feature` and `current_feature_started`
 
 3. **Append to progress.md**:
    ```markdown
@@ -309,6 +314,33 @@ Manually trigger a review of the current work, even mid-feature. Useful for:
 - Running the calibrated evaluator on demand
 
 Uses the same reviewer agent prompt as the automatic review phase.
+
+---
+
+## Subcommand: `/harness add`
+
+Add a new feature to an active campaign:
+
+1. Validate that a campaign exists
+2. Generate the next feature ID (increment from the highest existing ID)
+3. Ask the user for: name, description, verification criteria, priority, dependencies
+4. Append to `features.json`
+5. Update `total_features` in `campaign.json`
+6. Git commit the change
+
+This is the **only** sanctioned way to add features mid-campaign. Prevents scope creep from the agent — only the user can invoke `/harness add`.
+
+---
+
+## Subcommand: `/harness skip`
+
+Skip a feature by ID (e.g., `/harness skip F003`):
+
+1. Validate the feature exists and is `pending` or `blocked`
+2. Set status to `skipped` in `features.json`
+3. Check if any other features depended on this one — warn the user if so
+4. Update `progress.md` with skip reason
+5. Git commit the change
 
 ---
 

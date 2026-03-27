@@ -44,6 +44,12 @@ npx skills add suntao2yl/claude-skill-harness
 # 查看进度
 /harness status
 
+# 战役中途添加 feature
+/harness add "比赛观战模式"
+
+# 跳过某个 feature
+/harness skip F003
+
 # 重置战役
 /harness reset
 ```
