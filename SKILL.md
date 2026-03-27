@@ -62,9 +62,11 @@ Before any phase except INIT, always run the **Session Start Protocol** first.
 Run this at the beginning of every session that resumes an existing campaign:
 
 1. **Orient**: Read `.harness/campaign.json` and `.harness/progress.md`
-2. **Verify baseline**: Run the project's test suite (detect test runner from project structure). If tests fail, fix regressions BEFORE new work.
-3. **Git context**: Read recent git log (last 10 commits) to understand what changed since last session
-4. **Report**: Briefly tell the user — current campaign, features done/remaining, any failing tests
+2. **Setup environment**: If `setup_command` exists in `campaign.json`, run it to start dev servers / infrastructure
+3. **Verify baseline**: Run the project's test suite (detect test runner from project structure). If tests fail, fix regressions BEFORE new work.
+4. **Git context**: Read recent git log (last 10 commits) to understand what changed since last session
+5. **Update session tracking**: Increment `session_count` and set `last_session_date` in `campaign.json`
+6. **Report**: Briefly tell the user — current campaign, features done/remaining, any failing tests
 
 ---
 
@@ -98,13 +100,27 @@ Triggered by: `/harness "goal description"` when `.harness/` does not exist or i
       "status": "pending",
       "priority": 1,
       "dependencies": [],
-      "sessions": []
+      "sessions": [],
+      "checkpoint_notes": null,
+      "acceptance_checklist": null
     }
   ]
 }
 ```
 
 **CRITICAL**: The `verification` field is a contract. Once written, you MUST NOT modify it — only the user can change verification criteria. This prevents the evaluator-leniency trap.
+
+The `verification` field can also be a structured object for E2E or multi-step verification:
+
+```json
+{
+  "verification": {
+    "command": "npx playwright test tests/auth.spec.ts",
+    "manual_check": "Navigate to /login, enter credentials, verify redirect to /dashboard",
+    "expected": "All tests pass, login redirects correctly"
+  }
+}
+```
 
 4. **Generate `.harness/campaign.json`**:
 
@@ -113,12 +129,21 @@ Triggered by: `/harness "goal description"` when `.harness/` does not exist or i
   "goal": "The campaign goal",
   "created": "2026-03-27T10:00:00Z",
   "test_command": "auto-detected or user-specified test command",
+  "setup_command": "auto-detected or user-specified (e.g., npm run dev, docker compose up -d)",
   "project_root": "/absolute/path",
   "total_features": 25,
   "completed_features": 0,
-  "current_feature": null
+  "current_feature": null,
+  "current_feature_started": null,
+  "last_session_date": "2026-03-27",
+  "session_count": 1,
+  "mode": "standard"
 }
 ```
+
+**`setup_command`**: Detect from project structure (e.g., `npm run dev`, `docker compose up -d`, `make serve`) or ask the user. This runs at every session start to ensure the dev environment is ready.
+
+**`mode`**: Determined by feature count — see Complexity Adaptation below.
 
 5. **Initialize `.harness/progress.md`**:
 
@@ -145,10 +170,12 @@ Select the next feature to work on:
 1. Read `.harness/features.json`
 2. Find the highest-priority `pending` feature whose `dependencies` are all `done`
 3. Set its status to `in_progress` in the JSON
-4. Update `campaign.json` with `current_feature`
+4. Update `campaign.json` with `current_feature` and set `current_feature_started` to current timestamp
 5. Enter **plan mode** for this feature — design the implementation approach
-6. After plan approval, proceed to implementation using task list for step tracking
-7. After implementation, proceed to **Self-Test** then **Review**
+6. **Refine acceptance checklist**: After plan approval, expand the immutable `verification` into a detailed `acceptance_checklist` on the feature — a list of concrete, checkable items. This does NOT replace the original verification (which stays immutable) but supplements it with implementation-aware detail. The reviewer will check both.
+7. Proceed to implementation using task list for step tracking
+8. **Periodically update `checkpoint_notes`** on the feature during implementation — record completed steps, next actions, and open issues. This enables structured recovery if the session is interrupted.
+9. After implementation, proceed to **Self-Test** then **Review**
 
 ---
 
@@ -157,9 +184,10 @@ Select the next feature to work on:
 Resume an in-progress feature:
 
 1. Read the current feature from `campaign.json`
-2. Check git diff since last checkpoint to see what's already done
-3. Read any session notes from `progress.md`
-4. Continue implementation where it left off
+2. Read the feature's `checkpoint_notes` from `features.json` — this is the primary recovery mechanism, showing completed steps, next action, and open issues
+3. Check git diff since last checkpoint to see what's already done
+4. Read any session notes from `progress.md`
+5. Continue implementation where it left off, starting from the "next action" in checkpoint_notes
 
 ---
 
@@ -169,8 +197,9 @@ After implementing a feature, before review:
 
 1. Run the project's test suite (`test_command` from `campaign.json`)
 2. If the feature has a specific `verification` command, run that too
-3. If tests fail, fix them. Do NOT proceed to review with failing tests.
-4. If you cannot fix a test after 3 attempts, flag it to the user
+3. If the project has browser testing tools available (Playwright MCP, Puppeteer MCP), use them to verify user-facing behavior — test as a human user would
+4. If tests fail, fix them. Do NOT proceed to review with failing tests.
+5. If you cannot fix a test after 3 attempts, flag it to the user and consider marking the feature as `blocked` (see Blocked Feature Flow)
 
 ---
 
@@ -193,20 +222,22 @@ IMPORTANT CALIBRATION:
 CONTEXT:
 - Campaign goal: {goal}
 - Feature being reviewed: {feature name}
-- Verification criteria: {verification field from features.json}
+- Verification criteria (IMMUTABLE): {verification field from features.json}
+- Acceptance checklist (supplementary): {acceptance_checklist from features.json}
 - Test command: {test_command}
 - Files changed: {git diff --name-only since feature start}
 
 YOUR TASK:
-1. Read the verification criteria carefully
+1. Read the verification criteria AND acceptance checklist carefully. List each testable claim.
 2. Run the test command and report results
-3. Read the changed files and check for:
+3. If browser testing tools are available (Playwright MCP, Puppeteer MCP), use them to verify user-facing behavior visually — navigate the app, take screenshots as evidence
+4. Read the changed files and check for:
    - Logic errors
    - Missing edge cases mentioned in verification
    - Security issues (injection, XSS, etc.)
    - Regressions in existing functionality
-4. Give a PASS or FAIL verdict with specific findings
-5. If FAIL, list exact issues that must be fixed
+5. Give a PASS or FAIL verdict with specific findings
+6. If FAIL, list exact issues that must be fixed
 
 DO NOT rationalize away findings. If something looks wrong, it IS wrong until proven otherwise.
 """)
@@ -215,7 +246,8 @@ DO NOT rationalize away findings. If something looks wrong, it IS wrong until pr
 ### After Review
 
 - **PASS** → Proceed to Checkpoint
-- **FAIL** → Fix listed issues, re-run self-test, re-trigger review (max 3 cycles, then escalate to user)
+- **FAIL** → Fix listed issues, re-run self-test, re-trigger review (max 3 cycles)
+- **3 failures reached** → Escalate to user. If the issue requires external intervention, mark the feature as `blocked` with `blocked_reason` and return to PICK to select the next unblocked feature (see Blocked Feature Flow)
 
 ---
 
@@ -299,6 +331,45 @@ All features are done:
 
 ---
 
+## Blocked Feature Flow
+
+When a feature cannot be completed (3 failed self-test/review cycles, external dependency, unresolvable issue):
+
+1. Set the feature's status to `blocked` in `features.json`
+2. Record the reason in `blocked_reason` (be specific — "OAuth provider returns 500 on staging" not "doesn't work")
+3. Clear `current_feature` in `campaign.json`
+4. Append a blocked entry to `progress.md`
+5. Notify the user with the blocked reason
+6. Return to **PICK** phase — select the next unblocked feature whose dependencies are satisfied
+7. When the blocker is resolved (user confirms), set status back to `pending` so it re-enters the queue
+
+---
+
+## Session Boundary Guidelines
+
+Long-running sessions degrade in quality as context fills. Follow these guidelines:
+
+- **Natural boundary**: A completed checkpoint (feature done) is the ideal place to end a session. After checkpoint, suggest the user start a fresh session for the next feature.
+- **Mid-feature boundary**: If context is getting long during implementation, update `checkpoint_notes` on the current feature with completed steps and next action, then suggest a session break. The CONTINUE phase will pick up from checkpoint_notes.
+- **Never force**: These are suggestions, not requirements. The user decides when to break.
+- **Progress preservation**: Before any session end, ensure all state is written to `.harness/` files and committed to git. A new session should be able to orient fully from files alone.
+
+---
+
+## Complexity Adaptation
+
+Not all campaigns need the same ceremony. During INIT, set the `mode` in `campaign.json` based on feature count:
+
+| Mode | Feature Count | Differences |
+|------|--------------|-------------|
+| **lite** | < 10 | Skip schema generation. Simplified reviewer prompt (inline, no separate calibration template). No acceptance_checklist — verification alone is sufficient. |
+| **standard** | 10–30 | Full process as described in this document. |
+| **heavy** | 30+ | Add milestone checkpoints: every 10 features, run a full integration verification pass. Generate a mid-campaign summary in progress.md. Consider re-evaluating remaining feature priorities with the user. |
+
+The mode is a guideline, not rigid — the user can override it.
+
+---
+
 ## File Structure
 
 ```
@@ -328,3 +399,5 @@ All features are done:
 - **Verification tampering**: Agent modifies verification criteria to match buggy output → Blocked by immutable verification fields
 - **Leniency spiral**: Reviewer finds bug but rationalizes it → Mitigated by calibrated reviewer prompt
 - **Context amnesia**: New session doesn't know what happened → Prevented by session start protocol reading files
+- **Context exhaustion**: Agent quality degrades as context fills → Mitigated by session boundary guidelines and checkpoint_notes for structured recovery
+- **Stuck loops**: Feature fails review repeatedly with no path forward → Mitigated by blocked feature flow (3 strikes → block and move on)
