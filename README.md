@@ -44,6 +44,9 @@ npx skills add suntao2yl/claude-skill-harness
 # Check progress
 /harness status
 
+# Pick a specific feature to work on next
+/harness focus F007
+
 # Add a feature mid-campaign
 /harness add "spectator mode for matches"
 
@@ -105,6 +108,27 @@ Campaign `mode` (lite/standard/heavy) is set based on feature count, adjusting c
 
 ### Session boundary guidelines
 Checkpoints are natural session boundaries. The harness suggests breaks at the right moments and ensures all state is preserved for the next session.
+
+## Auto-resume (recommended)
+
+Configure a `SessionStart` hook so every new Claude session automatically detects an active campaign:
+
+```json
+// .claude/settings.json or ~/.claude/settings.json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "~/.claude/skills/harness/hooks/session-start.sh"
+      }]
+    }]
+  }
+}
+```
+
+With this hook, you never need to remember to type `/harness` — the campaign context is injected automatically at session start.
 
 ## Design principles
 

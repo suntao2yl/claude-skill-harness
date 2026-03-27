@@ -36,6 +36,7 @@ You are a **campaign orchestrator** that manages long-running development goals 
 /harness                       → Resume existing campaign (auto-detect phase)
 /harness review                → Manual QA trigger
 /harness status                → Campaign overview
+/harness focus F007            → Pick a specific feature to work on next
 /harness add "feature desc"    → Add a new feature to an active campaign
 /harness skip F003             → Skip a feature (user decision)
 /harness reset                 → Archive and restart campaign
@@ -174,11 +175,13 @@ Started: {date}
 Select the next feature to work on:
 
 1. Read `.harness/features.json`
-2. Find the highest-priority `pending` feature whose `dependencies` are all `done`
+2. **Select feature**: If the user invoked `/harness focus <id>`, use that feature (validate it exists and is `pending` or `blocked`). Otherwise, find the highest-priority `pending` feature whose `dependencies` are all `done`.
 3. Set its status to `in_progress` in the JSON
 4. Update `campaign.json` with `current_feature` and set `current_feature_started` to current timestamp
-5. Enter **plan mode** for this feature — design the implementation approach
-6. **Refine acceptance checklist**: After plan approval, expand the immutable `verification` into a detailed `acceptance_checklist` on the feature — a list of concrete, checkable items. This does NOT replace the original verification (which stays immutable) but supplements it with implementation-aware detail. The reviewer will check both.
+5. **Plan (adaptive)**:
+   - **Full plan mode**: Enter plan mode if priority is 1–2, the feature has dependencies, or mode is `heavy`. Design the implementation approach.
+   - **Quick plan**: For priority 3–5 features with no dependencies, or in `lite` mode — skip plan mode. Briefly outline the approach in a message to the user, then proceed directly.
+6. **Refine acceptance checklist** (standard/heavy mode only): After planning, expand the immutable `verification` into a detailed `acceptance_checklist` on the feature — a list of concrete, checkable items. This does NOT replace the original verification (which stays immutable) but supplements it with implementation-aware detail. The reviewer will check both.
 7. Proceed to implementation using task list for step tracking
 8. **Periodically update `checkpoint_notes`** on the feature during implementation — record completed steps, next actions, and open issues. This enables structured recovery if the session is interrupted.
 9. After implementation, proceed to **Self-Test** then **Review**
@@ -317,6 +320,18 @@ Uses the same reviewer agent prompt as the automatic review phase.
 
 ---
 
+## Subcommand: `/harness focus`
+
+Pick a specific feature to work on next (e.g., `/harness focus F007`):
+
+1. Validate the feature exists and is `pending` or `blocked` (if blocked, confirm with user that the blocker is resolved first)
+2. If another feature is currently `in_progress`, warn the user and ask for confirmation before switching
+3. Proceed to PICK phase with this feature pre-selected (skips priority-based selection)
+
+This is useful when the user knows which feature matters most right now, regardless of the harness's priority ordering.
+
+---
+
 ## Subcommand: `/harness add`
 
 Add a new feature to an active campaign:
@@ -358,8 +373,9 @@ All features are done:
 
 1. Run full test suite one final time
 2. Generate a campaign summary in `progress.md`
-3. Suggest next steps to the user (cleanup, release prep, new campaign)
-4. Ask if the `.harness/` directory should be kept for reference or cleaned up
+3. **Save campaign learnings to memory**: Review the campaign for non-obvious insights — patterns that worked, surprising blockers, architectural decisions that mattered. Save as a `project` type memory with the campaign goal as title. Only save what would help future campaigns in this project; skip anything derivable from code or git history.
+4. Suggest next steps to the user (cleanup, release prep, new campaign)
+5. Ask if the `.harness/` directory should be kept for reference or cleaned up
 
 ---
 
@@ -418,7 +434,7 @@ The mode is a guideline, not rigid — the user can override it.
 
 | Feature | How harness uses it |
 |---------|-------------------|
-| **Plan mode** | Entered automatically when picking a new feature |
+| **Plan mode** | Entered adaptively when picking a feature (based on priority and mode) |
 | **Task list** | Used within a session for step tracking during implementation |
 | **Agent tool** | Used for reviewer role separation |
 | **Memory** | Campaign-level learnings saved to project memory |
@@ -433,3 +449,36 @@ The mode is a guideline, not rigid — the user can override it.
 - **Context amnesia**: New session doesn't know what happened → Prevented by session start protocol reading files
 - **Context exhaustion**: Agent quality degrades as context fills → Mitigated by session boundary guidelines and checkpoint_notes for structured recovery
 - **Stuck loops**: Feature fails review repeatedly with no path forward → Mitigated by blocked feature flow (3 strikes → block and move on)
+
+---
+
+## Recommended Setup: Auto-Resume Hook
+
+For the best experience, configure a `SessionStart` hook so that every new Claude session automatically detects an active campaign and shows its status. This eliminates the need to remember to type `/harness` at the start of each session.
+
+Add to your project's `.claude/settings.json` (or global `~/.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/skills/harness/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Adjust the path if your skill is installed elsewhere. The hook:
+- Checks if `.harness/campaign.json` exists in the project directory
+- If yes, injects a brief campaign status summary into the session context
+- If no, exits silently with no effect
+
+This is optional — the harness works fully without it. The hook just makes the resume experience seamless.

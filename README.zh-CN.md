@@ -44,6 +44,9 @@ npx skills add suntao2yl/claude-skill-harness
 # 查看进度
 /harness status
 
+# 指定下一个要做的 feature
+/harness focus F007
+
 # 战役中途添加 feature
 /harness add "比赛观战模式"
 
@@ -105,6 +108,27 @@ INIT → 选择 feature → 规划 → 实现 → 自测 → 审查 → 检查�
 
 ### 会话边界指引
 检查点是天然的会话边界。Harness 在合适的时机建议中断，并确保所有状态已保存到文件，供下一次会话使用。
+
+## 自动恢复（推荐配置）
+
+配置 `SessionStart` hook，让每个新 Claude 会话自动检测活跃的 campaign：
+
+```json
+// .claude/settings.json 或 ~/.claude/settings.json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "~/.claude/skills/harness/hooks/session-start.sh"
+      }]
+    }]
+  }
+}
+```
+
+配置后无需每次手动输入 `/harness`——campaign 上下文会在会话启动时自动注入。
 
 ## 设计原则
 
