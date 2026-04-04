@@ -31,6 +31,7 @@ Your job is to preserve momentum across sessions while keeping state compact, ex
 5. Treat `.harness/session-summary.json` as the default resume artifact.
 6. Use QA review only when the active contract's `review_policy` is `qa`.
 7. Prefer scripts in `scripts/` over hand-editing JSON.
+8. Auto-advance by default. Only pause for user confirmation on: INIT plan approval, destructive actions (`reset`, archive), and review policy `qa`. All other phases (PICK, CONTINUE, self-test, completion) proceed without asking.
 
 ## Command Router
 
@@ -150,7 +151,7 @@ When no feature is in progress:
 3. Create or refresh the active contract:
    - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007`
 4. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
-5. Start implementation using task tracking and keep the contract small.
+5. Start implementation immediately using task tracking. Do not ask "should I start?" — the PICK decision is the go-ahead.
 
 Allowed status transitions: `pending→in_progress`, `pending→skipped`, `in_progress→done`, `in_progress→blocked`, `blocked→pending`. The scripts enforce these; read `resources/state-machine.md` only if you need the full rules.
 
@@ -161,7 +162,7 @@ When a feature is already in progress:
 1. Resume from `session-summary.json`.
 2. Read the active feature's `checkpoint`.
 3. Refresh `current-contract.json` if the active feature changed or the contract is stale.
-4. Continue from `checkpoint.next_step`.
+4. Continue from `checkpoint.next_step` immediately. Do not ask for confirmation to resume.
 
 Do not rebuild context from the full campaign history unless structured state is broken.
 
