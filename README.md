@@ -2,119 +2,116 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-A Claude Code skill for orchestrating long-running, multi-session development campaigns.
+A Claude Code skill for long-running, multi-session development campaigns.
 
-Built on insights from Anthropic Engineering research:
+Built from the same core ideas described in Anthropic Engineering's long-running harness work:
 - [Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps)
 - [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 
-## What it solves
+## What changed in v2
 
-| Problem | Mechanism |
-|---------|-----------|
-| Cross-session amnesia | File-driven state in `.harness/` + session start protocol |
-| Self-evaluation leniency bias | Physically separated reviewer agent with calibrated skepticism |
-| Premature "victory declaration" | Immutable verification contracts in `features.json` |
-| Context anxiety / rushed completion | One-feature-at-a-time discipline + mandatory checkpoint |
-| New session doesn't know what happened | `campaign.json` + `progress.md` + git log triple recovery |
-| Session interrupted mid-feature | Structured `checkpoint_notes` for reliable recovery |
-| Dev environment not ready | `setup_command` auto-detected and run at session start |
-| Context degradation in long sessions | Session boundary guidelines + checkpoint-based handoff |
-| Feature stuck in review loop | Blocked feature flow — 3 strikes, block and move on |
-| One-size-fits-all overhead | Complexity adaptation — lite/standard/heavy modes |
+Harness v2 keeps the `/harness` command surface the same, but swaps the internal recovery model:
 
-## Install
+- compact machine state instead of free-text recovery
+- one active `current-contract.json` per feature
+- `session-summary.json` as the default resume artifact
+- deterministic Python scripts for state transitions
+- risk-gated QA instead of always-on full reviewer loops
+- a much thinner `SKILL.md` so the skill itself burns fewer tokens
 
-```bash
-npx skills add suntao2yl/claude-skill-harness
-```
+## Core files
 
-## Usage
-
-```bash
-# Start a new campaign
-/harness "implement multiplayer battle system"
-
-# Resume in a new session (auto-detects phase)
-/harness
-
-# Manual QA review
-/harness review
-
-# Check progress
-/harness status
-
-# Pick a specific feature to work on next
-/harness focus F007
-
-# Add a feature mid-campaign
-/harness add "spectator mode for matches"
-
-# Skip a feature
-/harness skip F003
-
-# Reset campaign
-/harness reset
-```
-
-## How it works
-
-```
-/harness sits above plan mode in the abstraction hierarchy:
-
-  CLAUDE.md → /harness → plan mode → task list
-  (rules)    (campaign)  (one task)   (steps)
-```
-
-### Campaign lifecycle
-
-```
-INIT → PICK feature → plan → implement → self-test → review → checkpoint → PICK next
-                                 │                      ↑
-                          update checkpoint_notes   Separate agent context
-                          periodically              with calibrated skepticism
-```
-
-### Key files created
-
-```
+```text
 .harness/
-├── campaign.json          # Campaign metadata, session tracking, and current state
-├── features.json          # Feature list with immutable verification contracts
-├── features-schema.json   # JSON Schema for validation
-├── progress.md            # Human-readable session log
-└── archive/               # Archived past campaigns
+├── campaign.json
+├── features.json
+├── current-contract.json
+├── session-summary.json
+├── features-schema.json
+├── contract-schema.json
+├── session-summary-schema.json
+└── progress.md
 ```
 
-## Key features
+## State model
 
-### Structured session recovery
-Each in-progress feature tracks `checkpoint_notes` — completed steps, next action, open issues. When a session resumes, CONTINUE phase reads these notes for reliable handoff instead of guessing from git diff alone.
+### `campaign.json`
 
-### Environment setup automation
-`campaign.json` stores a `setup_command` (e.g., `npm run dev`, `docker compose up -d`). Every session start executes it before running tests, ensuring the dev environment is ready.
+Campaign metadata and defaults:
 
-### Browser/E2E testing integration
-When browser testing tools (Playwright MCP, Puppeteer MCP) are available, both self-test and review phases use them to verify user-facing behavior visually — testing as a human user would.
+- `bootstrap_command`
+- `setup_command`
+- `default_review_policy`
+- `baseline_status`
+- `last_session_commit`
 
-### Acceptance checklist
-During PICK phase, the immutable `verification` is expanded into a detailed `acceptance_checklist` — concrete checkable items informed by the implementation plan. The reviewer checks both.
+### `features.json`
 
-### Blocked feature flow
-When a feature fails 3 review cycles or hits an external blocker, it's marked `blocked` with a reason. The campaign moves on to the next unblocked feature instead of getting stuck.
+Feature tracking with immutable `verification` and structured `checkpoint` objects.
 
-### Complexity adaptation
-Campaign `mode` (lite/standard/heavy) is set based on feature count, adjusting ceremony level. Small campaigns skip schema generation; large ones add milestone integration checks.
+### `current-contract.json`
 
-### Session boundary guidelines
-Checkpoints are natural session boundaries. The harness suggests breaks at the right moments and ensures all state is preserved for the next session.
+The active feature contract:
 
-## Auto-resume (recommended)
+- `feature_id`
+- `goal`
+- `scope_in`
+- `scope_out`
+- `verification_claims`
+- `verification_commands`
+- `manual_checks`
+- `review_policy`
 
-Configure a `SessionStart` hook so every new Claude session automatically detects an active campaign:
+### `session-summary.json`
+
+Compact resume artifact used by new sessions and the SessionStart hook:
+
+- campaign goal and mode
+- current feature
+- progress counts
+- next resume steps
+- known failures
+- environment status
+
+## Built-in scripts
+
+```bash
+python3 scripts/harness_validate.py
+python3 scripts/harness_summary.py
+python3 scripts/harness_pick_next.py
+python3 scripts/harness_transition.py --feature-id F007 --to in_progress
+python3 scripts/harness_contract.py --feature-id F007
+python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+```
+
+These scripts only operate on `.harness/` and are meant to replace hand-edited JSON for common state transitions.
+`harness_contract.py` and `harness_checkpoint.py` only work on the active `in_progress` feature, and `harness_transition.py` refuses to create a second active feature.
+
+## Workflow
+
+```text
+INIT -> PICK -> contract -> implement -> self-test -> optional QA -> checkpoint -> done
+```
+
+Resume priority:
+
+1. `session-summary.json`
+2. `current-contract.json`
+3. active feature `checkpoint`
+4. recent lines from `progress.md` only if needed
+
+## Review policy
+
+- `selftest`: run local verification only
+- `qa`: run local verification first, then launch a separate skeptical reviewer agent
+
+Use `qa` when the active feature touches UI flows, auth, payments, migrations, concurrency, or external integrations. Otherwise default to `selftest`.
+
+## SessionStart hook
+
+Configure a hook so each new Claude session sees a compact campaign summary:
 
 ```json
-// .claude/settings.json or ~/.claude/settings.json
 {
   "hooks": {
     "SessionStart": [{
@@ -128,17 +125,20 @@ Configure a `SessionStart` hook so every new Claude session automatically detect
 }
 ```
 
-With this hook, you never need to remember to type `/harness` — the campaign context is injected automatically at session start.
+The hook only injects:
 
-## Design principles
+- goal
+- progress counts
+- current feature
+- review policy
+- last session date
+- one next-step line
 
-1. **File-driven state** — All cross-session state lives in `.harness/`, never in conversation memory
-2. **Role separation** — Implementer and reviewer are physically separate agent contexts
-3. **One feature at a time** — Complete, test, checkpoint, then move on
-4. **JSON for machine state** — Resists accidental modification better than Markdown
-5. **Immutable verification** — Feature acceptance criteria are locked at creation; agents cannot weaken them
-6. **Calibrated skepticism** — Reviewer prompt explicitly counters the documented leniency bias
-7. **Graceful degradation** — Blocked features don't stall the campaign; context breaks don't lose progress
+## Install
+
+```bash
+npx skills add suntao2yl/claude-skill-harness
+```
 
 ## License
 

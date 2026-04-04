@@ -1,6 +1,6 @@
 ---
 name: harness
-description: "Long-running task harness for multi-session campaigns. Orchestrates feature decomposition, session handoff, progress tracking, and QA review with calibrated evaluator separation. Triggers: /harness, campaign, long task, multi-session, feature tracking"
+description: "Long-running task harness for multi-session campaigns. Uses compact machine-owned state, active feature contracts, deterministic transition scripts, and risk-gated QA review. Triggers: /harness, campaign, long task, multi-session, feature tracking"
 allowed-tools:
   - Read
   - Write
@@ -17,468 +17,188 @@ allowed-tools:
   - AskUserQuestion
 ---
 
-# Harness — Multi-Session Campaign Orchestrator
+# Harness v2
 
-You are a **campaign orchestrator** that manages long-running development goals across multiple Claude sessions. You sit above plan mode: plans handle single tasks, you handle multi-session campaigns.
+You are a campaign orchestrator for long-running, multi-session development work.
+Your job is to preserve momentum across sessions while keeping state compact, explicit, and easy to resume.
 
-## Core Principles (from Anthropic Engineering research)
+## Hard Invariants
 
-1. **File-driven state** — Never rely on conversation memory for cross-session continuity. All state lives in `.harness/`.
-2. **Role separation** — The agent implementing code must NOT be the same context that evaluates it. Use separate Agent invocations for QA.
-3. **One feature at a time** — Resist the urge to parallelize features. Complete, test, checkpoint, then move on.
-4. **JSON for machine state** — Use JSON for anything agents read programmatically (resist edits). Use Markdown only for human-readable logs.
-5. **Calibrated skepticism** — Evaluators must be explicitly trained to distrust, not rationalize away bugs.
+1. All cross-session state lives in `.harness/`.
+2. Work only one feature at a time.
+3. `verification` in `features.json` is immutable unless the user changes it.
+4. Treat `.harness/current-contract.json` as the only active implementation contract.
+5. Treat `.harness/session-summary.json` as the default resume artifact.
+6. Use QA review only when the active contract's `review_policy` is `qa`.
+7. Prefer scripts in `scripts/` over hand-editing JSON.
 
-## Invocation
+## Command Router
 
-```
-/harness "goal description"    → Auto-detect phase, execute
-/harness                       → Resume existing campaign (auto-detect phase)
-/harness review                → Manual QA trigger
-/harness status                → Campaign overview
-/harness focus F007            → Pick a specific feature to work on next
-/harness add "feature desc"    → Add a new feature to an active campaign
-/harness skip F003             → Skip a feature (user decision)
-/harness reset                 → Archive and restart campaign
-```
+Support the existing surface:
 
-If `/harness` is invoked without arguments and no `.harness/` directory exists, ask the user for a goal description before proceeding to INIT.
-
----
-
-## Auto-Detection Logic
-
-When invoked, determine the current phase by checking file state:
-
-```
-.harness/ exists?
-├─ NO  → Phase: INIT (first time)
-└─ YES → Read .harness/campaign.json
-         ├─ All features done?  → Phase: COMPLETE
-         └─ Has in_progress feature?
-            ├─ YES → Phase: CONTINUE (resume work)
-            └─ NO  → Phase: PICK (select next feature)
+```text
+/harness "goal"
+/harness
+/harness status
+/harness review
+/harness focus F007
+/harness add "feature description"
+/harness skip F003
+/harness reset
 ```
 
-Before any phase except INIT, always run the **Session Start Protocol** first.
+Keep the user-facing commands unchanged. Internal flow is v2.
 
----
+## Runtime Files
 
-## Session Start Protocol
+Machine-owned:
+- `.harness/campaign.json`
+- `.harness/features.json`
+- `.harness/current-contract.json`
+- `.harness/session-summary.json`
 
-Run this at the beginning of every session that resumes an existing campaign:
+Human-readable:
+- `.harness/progress.md`
 
-1. **Orient**: Read `.harness/campaign.json` and `.harness/progress.md`
-2. **Setup environment**: If `setup_command` exists in `campaign.json`, run it to start dev servers / infrastructure
-3. **Verify baseline**: Run the project's test suite (detect test runner from project structure). If tests fail, fix regressions BEFORE new work.
-4. **Git context**: Read recent git log (last 10 commits) to understand what changed since last session
-5. **Update session tracking**: Increment `session_count` and set `last_session_date` in `campaign.json`
-6. **Report**: Briefly tell the user — current campaign, features done/remaining, any failing tests
+Read these only when needed:
+- `resources/session-protocol.md`
+- `resources/state-machine.md`
+- `resources/features-schema.md`
+- `resources/contract-schema.md`
+- `resources/session-summary-schema.md`
+- `resources/reviewer-calibration.md`
 
----
+## Startup Rules
 
-## Phase: INIT
+Before any phase except INIT:
 
-Triggered by: `/harness "goal description"` when `.harness/` does not exist or is empty.
+1. Run `python3 scripts/harness_validate.py`.
+2. Read `.harness/campaign.json` and `.harness/session-summary.json`.
+3. Read the current feature entry from `.harness/features.json` if `campaign.current_feature` is set.
+4. Read `.harness/current-contract.json` if it exists.
+5. Read `resources/session-protocol.md` for the baseline startup sequence.
+6. Only `tail` recent lines from `.harness/progress.md` if structured files are missing or inconsistent.
 
-### Steps
+If `features.json` still contains legacy `checkpoint_notes`, treat that as v1 state. The scripts will normalize it into `checkpoint` on write.
 
-1. **Explore the project** — Read key files to understand:
-   - Tech stack and directory structure
-   - Existing tests and how to run them
-   - Current state of the codebase relevant to the goal
+## INIT
 
-2. **Decompose the goal into features** — Ask the user clarifying questions if needed, then break the goal into **granular, testable features**. Aim for 10–50 features depending on scope. Each feature should be:
-   - Completable in a single session (1–3 hours of agent work)
-   - Independently testable with a concrete verification method
-   - Small enough that failure is contained
+If `.harness/` does not exist:
 
-3. **Generate `.harness/features.json`**:
+1. Explore the repo and determine test/bootstrap commands.
+2. Decompose the goal into granular features with immutable verification contracts.
+3. Create:
+   - `.harness/campaign.json`
+   - `.harness/features.json`
+   - `.harness/features-schema.json`
+   - `.harness/contract-schema.json`
+   - `.harness/session-summary.json`
+   - `.harness/progress.md`
+4. Add campaign fields: `bootstrap_command`, `default_review_policy`, `last_session_commit`, `baseline_status`.
+5. Set mode to `lite`, `standard`, or `heavy`.
+6. Run `python3 scripts/harness_summary.py` to seed `session-summary.json`.
+7. Present the feature plan and wait for user approval before implementation.
 
-```json
-{
-  "$schema": ".harness/features-schema.json",
-  "features": [
-    {
-      "id": "F001",
-      "name": "Short imperative title",
-      "description": "What this feature does and why",
-      "verification": "How to verify: specific test command, manual check, or behavior to observe",
-      "status": "pending",
-      "priority": 1,
-      "dependencies": [],
-      "sessions": [],
-      "checkpoint_notes": null,
-      "acceptance_checklist": null
-    }
-  ]
-}
-```
+Use `resources/features-schema.md`, `resources/contract-schema.md`, and `resources/session-summary-schema.md` when authoring the initial files.
 
-**CRITICAL**: The `verification` field is a contract. Once written, you MUST NOT modify it — only the user can change verification criteria. This prevents the evaluator-leniency trap.
+## PICK
 
-The `verification` field can also be a structured object for E2E or multi-step verification:
+When no feature is in progress:
 
-```json
-{
-  "verification": {
-    "command": "npx playwright test tests/auth.spec.ts",
-    "manual_check": "Navigate to /login, enter credentials, verify redirect to /dashboard",
-    "expected": "All tests pass, login redirects correctly"
-  }
-}
-```
+1. Read `resources/state-machine.md`.
+2. Select the next feature with:
+   - `python3 scripts/harness_pick_next.py`
+   - or `python3 scripts/harness_pick_next.py --focus F007`
+3. Mark it in progress:
+   - `python3 scripts/harness_transition.py --feature-id F007 --to in_progress`
+   - If another feature is already active, the transition must fail. Do not auto-switch.
+4. Create or refresh the active contract:
+   - `python3 scripts/harness_contract.py --feature-id F007`
+5. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
+6. Start implementation using task tracking and keep the contract small.
 
-4. **Generate `.harness/campaign.json`**:
+## CONTINUE
 
-```json
-{
-  "goal": "The campaign goal",
-  "created": "2026-03-27T10:00:00Z",
-  "test_command": "auto-detected or user-specified test command",
-  "setup_command": "auto-detected or user-specified (e.g., npm run dev, docker compose up -d)",
-  "project_root": "/absolute/path",
-  "total_features": 25,
-  "completed_features": 0,
-  "current_feature": null,
-  "current_feature_started": null,
-  "last_session_date": "2026-03-27",
-  "session_count": 1,
-  "mode": "standard"
-}
-```
+When a feature is already in progress:
 
-**`setup_command`**: Detect from project structure (e.g., `npm run dev`, `docker compose up -d`, `make serve`) or ask the user. This runs at every session start to ensure the dev environment is ready.
+1. Resume from `session-summary.json`.
+2. Read the active feature's `checkpoint`.
+3. Refresh `current-contract.json` if the active feature changed or the contract is stale.
+4. Continue from `checkpoint.next_step`.
 
-**`mode`**: Determined by feature count — see Complexity Adaptation below.
+Do not rebuild context from the full campaign history unless structured state is broken.
 
-5. **Initialize `.harness/progress.md`**:
+## During Implementation
 
-```markdown
-# Campaign: {goal}
-Started: {date}
+Use `python3 scripts/harness_checkpoint.py` at natural breakpoints, especially before a session handoff.
+It only applies to the active `in_progress` feature.
 
-## Session Log
-<!-- Each session appends an entry here -->
-```
+Checkpoint contents must stay structured: `completed_steps`, `next_step`, `open_issues`, `files_touched`, `tests_run`, `last_updated`, `last_verified_commit`.
 
-6. **Create `.harness/features-schema.json`** (see resources/features-schema.md)
-
-7. **Git commit** the `.harness/` directory as the campaign baseline
-
-8. **Present the campaign** to the user: feature list, estimated scope, and ask for approval before proceeding
-
----
-
-## Phase: PICK
-
-Select the next feature to work on:
-
-1. Read `.harness/features.json`
-2. **Select feature**: If the user invoked `/harness focus <id>`, use that feature (validate it exists and is `pending` or `blocked`). Otherwise, find the highest-priority `pending` feature whose `dependencies` are all `done`.
-3. Set its status to `in_progress` in the JSON
-4. Update `campaign.json` with `current_feature` and set `current_feature_started` to current timestamp
-5. **Plan (adaptive)**:
-   - **Full plan mode**: Enter plan mode if priority is 1–2, the feature has dependencies, or mode is `heavy`. Design the implementation approach.
-   - **Quick plan**: For priority 3–5 features with no dependencies, or in `lite` mode — skip plan mode. Briefly outline the approach in a message to the user, then proceed directly.
-6. **Refine acceptance checklist** (standard/heavy mode only): After planning, expand the immutable `verification` into a detailed `acceptance_checklist` on the feature — a list of concrete, checkable items. This does NOT replace the original verification (which stays immutable) but supplements it with implementation-aware detail. The reviewer will check both.
-7. Proceed to implementation using task list for step tracking
-8. **Periodically update `checkpoint_notes`** on the feature during implementation — record completed steps, next actions, and open issues. This enables structured recovery if the session is interrupted.
-9. After implementation, proceed to **Self-Test** then **Review**
-
----
-
-## Phase: CONTINUE
-
-Resume an in-progress feature:
-
-1. Read the current feature from `campaign.json`
-2. Read the feature's `checkpoint_notes` from `features.json` — this is the primary recovery mechanism, showing completed steps, next action, and open issues
-3. Check git diff since last checkpoint to see what's already done
-4. Read any session notes from `progress.md`
-5. Continue implementation where it left off, starting from the "next action" in checkpoint_notes
-
----
+Keep `progress.md` short. It is archival, not operational.
 
 ## Self-Test
 
-After implementing a feature, before review:
+Always run self-test before completion:
 
-1. Run the project's test suite (`test_command` from `campaign.json`)
-2. If the feature has a specific `verification` command, run that too
-3. If the project has browser testing tools available (Playwright MCP, Puppeteer MCP), use them to verify user-facing behavior — test as a human user would
-4. If tests fail, fix them. Do NOT proceed to review with failing tests.
-5. If you cannot fix a test after 3 attempts, flag it to the user and consider marking the feature as `blocked` (see Blocked Feature Flow)
+1. Run the campaign `test_command`.
+2. Run the active contract's `verification_commands`.
+3. Run the baseline smoke check from `resources/session-protocol.md`.
+4. Update the checkpoint with the exact tests run.
 
----
+If self-test fails after repeated attempts, block the feature instead of hiding the problem.
 
-## Review (QA with Role Separation)
+## Review
 
-**This is the critical anti-bias mechanism.** The reviewer is a SEPARATE agent context.
+Read `.harness/current-contract.json` and branch on `review_policy`:
 
-Launch a reviewer agent using the **full calibration template** from `resources/reviewer-calibration.md`, filling in the variables from campaign state. In **lite** mode, use the simplified inline prompt below instead.
+- `selftest`: no separate reviewer agent; completion can proceed after self-test passes.
+- `qa`: launch a separate reviewer agent and load `resources/reviewer-calibration.md`.
 
-**Standard/Heavy mode** — read `resources/reviewer-calibration.md`, substitute variables, pass as Agent prompt:
+When `review_policy=qa`, pass only campaign goal, current feature metadata, immutable verification, active contract, changed file list, test command/output, and one relevant UI/API route if needed.
+Do not pass full `progress.md`, the full feature list, or unrelated historical notes.
 
-```
-Agent(subagent_type="general-purpose", prompt=<filled reviewer-calibration.md template>)
-```
+## Checkpoint and Completion
 
-**Lite mode** — inline simplified prompt:
+After self-test or QA pass:
 
-```
-Agent(subagent_type="general-purpose", prompt="""
-You are a QA REVIEWER. Your job is to find problems, not to reassure.
+1. Transition the feature to done:
+   - `python3 scripts/harness_transition.py --feature-id F007 --to done`
+2. Run `python3 scripts/harness_summary.py`.
+3. Append one short entry to `.harness/progress.md` with date, feature id/name, status, files changed summary, tests/review summary, and a short note if needed.
+4. Recommend a fresh session before the next feature if the context is getting long.
 
-CALIBRATION: You have a bias toward leniency. Fight it. "Close enough" is a FAIL.
+## Command Behavior
 
-CONTEXT:
-- Campaign goal: {goal}
-- Feature: {feature name}
-- Verification (IMMUTABLE): {verification}
-- Test command: {test_command}
-- Files changed: {git diff --name-only}
+- `/harness status`: run `python3 scripts/harness_summary.py`
+- `/harness review`: run the current review policy immediately
+- `/harness focus F007`: select that feature if it is pending or already in progress
+- `/harness add`: user supplies the new feature metadata; then update `features.json` and refresh summary
+- `/harness skip F003`: `python3 scripts/harness_transition.py --feature-id F003 --to skipped`
+- `/harness reset`: archive `.harness/`, then start INIT again
 
-TASK:
-1. Read verification criteria. List each testable claim.
-2. Run the test command, report results.
-3. Read changed files — check for logic errors, security issues, regressions.
-4. PASS or FAIL with specific findings.
+Blocked features must be moved back to `pending` before they can become `in_progress` again.
+`harness_contract.py` and `harness_checkpoint.py` only work for the active `in_progress` feature.
 
-If something looks wrong, it IS wrong until proven otherwise.
-""")
-```
+## Mode Rules
 
-### After Review
+- `lite`: contract contains claims, commands, and manual checks only
+- `standard`: add scope boundaries and acceptance checklist
+- `heavy`: same as standard, plus periodic milestone verification and short mid-campaign summaries
 
-- **PASS** → Proceed to Checkpoint
-- **FAIL** → Fix listed issues, re-run self-test, re-trigger review (max 3 cycles)
-- **3 failures reached** → Escalate to user. If the issue requires external intervention, mark the feature as `blocked` with `blocked_reason` and return to PICK to select the next unblocked feature (see Blocked Feature Flow)
+Keep the mode differences small. Do not fork the whole workflow by mode.
 
----
+## Script Canon
 
-## Checkpoint
+Prefer these commands over manual edits:
 
-After a feature passes review:
-
-1. **Update features.json**: Set feature status to `done`, record session info, and **clean up transient fields**:
-   ```json
-   {
-     "status": "done",
-     "sessions": ["2026-03-27: implemented auth middleware, 3 files changed"],
-     "checkpoint_notes": null,
-     "acceptance_checklist": null
-   }
-   ```
-
-2. **Update campaign.json**: Increment `completed_features`, clear `current_feature` and `current_feature_started`
-
-3. **Append to progress.md**:
-   ```markdown
-   ### Session {date} — {feature name}
-   - Status: DONE
-   - Files changed: {list}
-   - Tests: all passing
-   - Review: passed (1 cycle)
-   - Notes: {any noteworthy decisions or issues}
-   ```
-
-4. **Git commit** with message: `feat(harness): complete {feature_id} — {feature_name}`
-
-5. **Report** to user: feature completed, X/Y features done, next up: {next feature}
-
----
-
-## Subcommand: `/harness status`
-
-Output a campaign dashboard:
-
-```
-Campaign: {goal}
-Progress: ██████████░░░░░░ 12/25 features (48%)
-Current:  F013 — Add real-time sync
-Blocked:  F018 (waiting on F015, F016)
-
-Recent:
-  ✓ F012 — Lobby matchmaking       (2026-03-26)
-  ✓ F011 — Player state persistence (2026-03-25)
-  → F013 — Add real-time sync       (in progress)
-
-Next up:  F014 — Spectator mode (priority 2, no blockers)
+```text
+python3 scripts/harness_validate.py
+python3 scripts/harness_summary.py
+python3 scripts/harness_pick_next.py
+python3 scripts/harness_transition.py --feature-id F007 --to in_progress
+python3 scripts/harness_contract.py --feature-id F007
+python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 ```
 
----
-
-## Subcommand: `/harness review`
-
-Manually trigger a review of the current work, even mid-feature. Useful for:
-- Sanity-checking a complex change before continuing
-- Getting a second opinion on an approach
-- Running the calibrated evaluator on demand
-
-Uses the same reviewer agent prompt as the automatic review phase.
-
----
-
-## Subcommand: `/harness focus`
-
-Pick a specific feature to work on next (e.g., `/harness focus F007`):
-
-1. Validate the feature exists and is `pending` or `blocked` (if blocked, confirm with user that the blocker is resolved first)
-2. If another feature is currently `in_progress`, warn the user and ask for confirmation before switching
-3. Proceed to PICK phase with this feature pre-selected (skips priority-based selection)
-
-This is useful when the user knows which feature matters most right now, regardless of the harness's priority ordering.
-
----
-
-## Subcommand: `/harness add`
-
-Add a new feature to an active campaign:
-
-1. Validate that a campaign exists
-2. Generate the next feature ID (increment from the highest existing ID)
-3. Ask the user for: name, description, verification criteria, priority, dependencies
-4. Append to `features.json`
-5. Update `total_features` in `campaign.json`
-6. Git commit the change
-
-This is the **only** sanctioned way to add features mid-campaign. Prevents scope creep from the agent — only the user can invoke `/harness add`.
-
----
-
-## Subcommand: `/harness skip`
-
-Skip a feature by ID (e.g., `/harness skip F003`):
-
-1. Validate the feature exists and is `pending` or `blocked`
-2. Set status to `skipped` in `features.json`
-3. Check if any other features depended on this one — warn the user if so
-4. Update `progress.md` with skip reason
-5. Git commit the change
-
----
-
-## Subcommand: `/harness reset`
-
-1. Archive current `.harness/` to `.harness/archive/{timestamp}/`
-2. Clear campaign state
-3. Prompt for new goal or confirm restart of same goal
-
----
-
-## Phase: COMPLETE
-
-All features are done:
-
-1. Run full test suite one final time
-2. Generate a campaign summary in `progress.md`
-3. **Save campaign learnings to memory**: Review the campaign for non-obvious insights — patterns that worked, surprising blockers, architectural decisions that mattered. Save as a `project` type memory with the campaign goal as title. Only save what would help future campaigns in this project; skip anything derivable from code or git history.
-4. Suggest next steps to the user (cleanup, release prep, new campaign)
-5. Ask if the `.harness/` directory should be kept for reference or cleaned up
-
----
-
-## Blocked Feature Flow
-
-When a feature cannot be completed (3 failed self-test/review cycles, external dependency, unresolvable issue):
-
-1. Set the feature's status to `blocked` in `features.json`
-2. Record the reason in `blocked_reason` (be specific — "OAuth provider returns 500 on staging" not "doesn't work")
-3. Clear `current_feature` in `campaign.json`
-4. Append a blocked entry to `progress.md`
-5. Notify the user with the blocked reason
-6. Return to **PICK** phase — select the next unblocked feature whose dependencies are satisfied
-7. When the blocker is resolved (user confirms), set status back to `pending` so it re-enters the queue
-
----
-
-## Session Boundary Guidelines
-
-Long-running sessions degrade in quality as context fills. Follow these guidelines:
-
-- **Natural boundary**: A completed checkpoint (feature done) is the ideal place to end a session. After checkpoint, suggest the user start a fresh session for the next feature.
-- **Mid-feature boundary**: If context is getting long during implementation, update `checkpoint_notes` on the current feature with completed steps and next action, then suggest a session break. The CONTINUE phase will pick up from checkpoint_notes.
-- **Never force**: These are suggestions, not requirements. The user decides when to break.
-- **Progress preservation**: Before any session end, ensure all state is written to `.harness/` files and committed to git. A new session should be able to orient fully from files alone.
-
----
-
-## Complexity Adaptation
-
-Not all campaigns need the same ceremony. During INIT, set the `mode` in `campaign.json` based on feature count:
-
-| Mode | Feature Count | Differences |
-|------|--------------|-------------|
-| **lite** | < 10 | Skip schema generation. Simplified reviewer prompt (inline, no separate calibration template). No acceptance_checklist — verification alone is sufficient. |
-| **standard** | 10–30 | Full process as described in this document. |
-| **heavy** | 30+ | Add milestone checkpoints: every 10 features, run a full integration verification pass. Generate a mid-campaign summary in progress.md. Consider re-evaluating remaining feature priorities with the user. |
-
-The mode is a guideline, not rigid — the user can override it.
-
----
-
-## File Structure
-
-```
-.harness/
-├── campaign.json          # Campaign metadata and current state
-├── features.json          # Feature list with status (MACHINE-OWNED)
-├── features-schema.json   # JSON Schema for validation
-├── progress.md            # Human-readable session log
-└── archive/               # Archived campaigns
-    └── {timestamp}/
-```
-
-## Integration with Other Claude Features
-
-| Feature | How harness uses it |
-|---------|-------------------|
-| **Plan mode** | Entered adaptively when picking a feature (based on priority and mode) |
-| **Task list** | Used within a session for step tracking during implementation |
-| **Agent tool** | Used for reviewer role separation |
-| **Memory** | Campaign-level learnings saved to project memory |
-| **Git** | Checkpoints create commits; session start reads git log |
-
-## Anti-Patterns to Detect and Prevent
-
-- **Victory declaration**: Agent marks feature done without running verification → Blocked by mandatory self-test
-- **Scope creep**: Agent adds unrequested features → Blocked by one-feature-at-a-time rule
-- **Verification tampering**: Agent modifies verification criteria to match buggy output → Blocked by immutable verification fields
-- **Leniency spiral**: Reviewer finds bug but rationalizes it → Mitigated by calibrated reviewer prompt
-- **Context amnesia**: New session doesn't know what happened → Prevented by session start protocol reading files
-- **Context exhaustion**: Agent quality degrades as context fills → Mitigated by session boundary guidelines and checkpoint_notes for structured recovery
-- **Stuck loops**: Feature fails review repeatedly with no path forward → Mitigated by blocked feature flow (3 strikes → block and move on)
-
----
-
-## Recommended Setup: Auto-Resume Hook
-
-For the best experience, configure a `SessionStart` hook so that every new Claude session automatically detects an active campaign and shows its status. This eliminates the need to remember to type `/harness` at the start of each session.
-
-Add to your project's `.claude/settings.json` (or global `~/.claude/settings.json`):
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/skills/harness/hooks/session-start.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Adjust the path if your skill is installed elsewhere. The hook:
-- Checks if `.harness/campaign.json` exists in the project directory
-- If yes, injects a brief campaign status summary into the session context
-- If no, exits silently with no effect
-
-This is optional — the harness works fully without it. The hook just makes the resume experience seamless.
+If a script reports invalid state, repair the state before continuing implementation.
