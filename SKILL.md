@@ -170,7 +170,9 @@ Do not rebuild context from the full campaign history unless structured state is
 Use `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py` at natural breakpoints, especially before a session handoff.
 It only applies to the active `in_progress` feature.
 
-Checkpoint contents must stay structured: `completed_steps`, `next_step`, `open_issues`, `files_touched`, `tests_run`, `last_updated`, `last_verified_commit`.
+Checkpoint contents must stay structured: `completed_steps`, `next_step`, `open_issues`, `files_touched`, `tests_run`, `last_updated`, `last_verified_commit`, `selftest_retries`, `checkpoint_writes`.
+
+When the feature has multiple independent sub-tasks (e.g. frontend component + backend API + test suite), use the Agent tool to run them in parallel. Merge results and update the checkpoint after all agents complete. Do not parallelize steps that depend on each other.
 
 Keep `progress.md` short. It is archival, not operational.
 
@@ -183,7 +185,13 @@ Always run self-test before completion:
 3. Run the baseline smoke check (see Baseline Verification above).
 4. Update the checkpoint with the exact tests run.
 
-If self-test fails after repeated attempts, block the feature instead of hiding the problem.
+If self-test fails:
+
+1. Run `harness_checkpoint.py --selftest-retry` to increment `selftest_retries`.
+2. Diagnose and fix the issue, then re-run.
+3. When `selftest_retries >= 3`, stop retrying — block the feature with `harness_transition.py --to blocked --blocked-reason "..."` and record the failure pattern.
+
+Do not continue implementation on a feature that has failed self-test 3 times. The block forces a deliberate re-evaluation in the next session.
 
 ## Review
 
@@ -203,7 +211,18 @@ After self-test or QA pass:
    - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to done`
 2. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py`.
 3. Append one short entry to `.harness/progress.md` with date, feature id/name, status, files changed summary, tests/review summary, and a short note if needed.
-4. Recommend a fresh session before the next feature if the context is getting long.
+4. Check session freshness warnings in the summary output before continuing to the next feature.
+
+### Session Freshness
+
+Start a fresh session when any of these signals appear (reported by `harness_summary.py`):
+
+- 2+ features completed in the current session
+- checkpoint written 3+ times for the current feature
+- 10+ completed steps accumulated in the checkpoint
+- `selftest_retries >= 3` (this also requires blocking the feature)
+
+These are hard signals, not suggestions. When they appear, checkpoint the current state and hand off to a new session.
 
 ## Command Behavior
 

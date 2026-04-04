@@ -23,6 +23,9 @@
 - `/harness focus` 切换前检查是否有 in_progress 冲突
 - 启动时只读取活跃 feature 条目，而非整个 `features.json`
 - `session-protocol.md` 合并到 SKILL.md，减少每次会话的 token 开销
+- 重试升级：`selftest_retries` 计数器连续失败 3 次后自动 block
+- 会话新鲜度信号：`checkpoint_writes`、已完成步骤数、会话内完成 feature 数触发换会话建议
+- 并行子任务指导：在单个 feature 内使用 Agent tool 并行处理独立子任务
 
 ## 关键文件
 

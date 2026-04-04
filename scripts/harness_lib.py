@@ -114,6 +114,8 @@ def parse_legacy_checkpoint(notes: Optional[str]) -> Optional[Dict[str, Any]]:
         "tests_run": [],
         "last_updated": utc_now(),
         "last_verified_commit": None,
+        "selftest_retries": 0,
+        "checkpoint_writes": 0,
     }
 
 
@@ -143,6 +145,8 @@ def normalize_checkpoint(value: Any) -> Optional[Dict[str, Any]]:
         "tests_run": dedupe([str(item) for item in ensure_list(value.get("tests_run"))]),
         "last_updated": str(value.get("last_updated") or utc_now()),
         "last_verified_commit": value.get("last_verified_commit"),
+        "selftest_retries": int(value.get("selftest_retries") or 0),
+        "checkpoint_writes": int(value.get("checkpoint_writes") or 0),
     }
 
 
@@ -667,6 +671,28 @@ def build_session_summary(
         except ValueError:
             pass
     summary["open_issues"] = dedupe(open_issues)
+    # Session freshness indicators
+    freshness_warnings: List[str] = []
+    done_count = counts.get("done", 0) + counts.get("completed", 0)
+    session_done = done_count - (existing_summary or {}).get("progress_counts", {}).get("done", 0)
+    if session_done >= 2:
+        freshness_warnings.append(f"{session_done} features completed this session — consider a fresh session.")
+    if current_id:
+        try:
+            feature = get_feature(features, current_id)
+            cp = feature.get("checkpoint") or {}
+            writes = cp.get("checkpoint_writes", 0)
+            steps = len(cp.get("completed_steps") or [])
+            retries = cp.get("selftest_retries", 0)
+            if writes >= 3:
+                freshness_warnings.append(f"checkpoint written {writes} times — context may be heavy.")
+            if steps >= 10:
+                freshness_warnings.append(f"{steps} completed steps — consider a fresh session.")
+            if retries >= 3:
+                freshness_warnings.append(f"selftest failed {retries} times — block this feature.")
+        except ValueError:
+            pass
+    summary["freshness_warnings"] = freshness_warnings
     return summary
 
 
@@ -710,6 +736,10 @@ def validate_feature(feature: Dict[str, Any]) -> List[str]:
                 checkpoint.get("last_verified_commit"), str
             ):
                 errors.append(f"Feature {feature_id}: checkpoint.last_verified_commit must be a string or null")
+            if not isinstance(checkpoint.get("selftest_retries", 0), int):
+                errors.append(f"Feature {feature_id}: checkpoint.selftest_retries must be an integer")
+            if not isinstance(checkpoint.get("checkpoint_writes", 0), int):
+                errors.append(f"Feature {feature_id}: checkpoint.checkpoint_writes must be an integer")
         if status != "in_progress":
             errors.append(f"Feature {feature_id}: only in_progress features may carry a checkpoint")
     return errors
@@ -816,15 +846,21 @@ def format_summary_lines(summary: Dict[str, Any], review_policy: str) -> List[st
     next_step = ""
     if summary.get("resume_steps"):
         next_step = summary["resume_steps"][0]
-    return [
+    lines = [
         f"Campaign: {summary.get('campaign_goal', '')}",
         f"Progress: {progress} (mode: {summary.get('mode', 'standard')})",
         f"Current feature: {summary.get('current_feature') or 'none'}",
         f"Review policy: {review_policy}",
         f"Environment: {summary.get('environment_status', 'unknown')}",
         f"Last session: {summary.get('last_session_date') or 'unknown'}",
-        f"Next: {next_step or 'Run scripts/harness_summary.py to refresh resume steps.'}",
+        f"Next: {next_step or 'Run harness_summary.py to refresh resume steps.'}",
     ]
+    freshness = summary.get("freshness_warnings") or []
+    if freshness:
+        lines.append("Session freshness:")
+        for warning in freshness:
+            lines.append(f"  ! {warning}")
+    return lines
 
 
 def fail(message: str, *, exit_code: int = 1) -> None:

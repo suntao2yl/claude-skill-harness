@@ -23,6 +23,9 @@ Harness v2 keeps the `/harness` command surface the same, but swaps the internal
 - `/harness focus` checks for in-progress conflicts before switching
 - startup reads only the active feature from `features.json`, not the entire file
 - session-protocol.md merged into SKILL.md to reduce per-session token overhead
+- retry escalation: `selftest_retries` counter auto-blocks after 3 consecutive failures
+- session freshness signals: `checkpoint_writes`, completed step count, and session feature count trigger new-session recommendations
+- parallel sub-task guidance: use Agent tool for independent work within a single feature
 
 ## Core files
 

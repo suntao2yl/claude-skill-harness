@@ -95,6 +95,16 @@ Use this schema when creating `.harness/features-schema.json`.
               },
               "last_verified_commit": {
                 "type": ["string", "null"]
+              },
+              "selftest_retries": {
+                "type": "integer",
+                "default": 0,
+                "description": "Number of consecutive self-test failures. Auto-block at 3."
+              },
+              "checkpoint_writes": {
+                "type": "integer",
+                "default": 0,
+                "description": "Number of checkpoint writes in this feature. Used for session freshness signals."
               }
             },
             "required": [

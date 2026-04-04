@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file-touched", action="append", default=[], help="File touched entry")
     parser.add_argument("--test-run", action="append", default=[], help="Executed test or verification command")
     parser.add_argument("--last-verified-commit", help="Commit hash associated with this checkpoint")
+    parser.add_argument("--selftest-retry", action="store_true", help="Increment selftest retry counter")
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     return parser.parse_args()
 
@@ -41,11 +42,15 @@ def main() -> int:
     project_root = project_root_arg(args.project_root)
     campaign, features = load_state(project_root)
     feature_id, feature = require_active_feature(campaign, features, args.feature_id, verb="checkpoint")
+    existing_checkpoint = feature.get("checkpoint") or {}
     files_touched = args.file_touched
     if not files_touched:
-        existing_checkpoint = feature.get("checkpoint") or {}
         since = existing_checkpoint.get("last_verified_commit")
         files_touched = infer_git_changed_files(project_root, since)
+    selftest_retries = int(existing_checkpoint.get("selftest_retries") or 0)
+    if args.selftest_retry:
+        selftest_retries += 1
+    checkpoint_writes = int(existing_checkpoint.get("checkpoint_writes") or 0) + 1
     feature["checkpoint"] = {
         "completed_steps": dedupe(args.completed_step),
         "next_step": args.next_step.strip(),
@@ -54,6 +59,8 @@ def main() -> int:
         "tests_run": args.test_run,
         "last_updated": utc_now(),
         "last_verified_commit": args.last_verified_commit or infer_git_commit(project_root),
+        "selftest_retries": selftest_retries,
+        "checkpoint_writes": checkpoint_writes,
     }
     existing_summary = load_session_summary(project_root, required=False)
     contract = load_contract(project_root, required=False)

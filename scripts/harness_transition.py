@@ -88,6 +88,8 @@ def main() -> int:
                 "tests_run": [],
                 "last_updated": utc_now(),
                 "last_verified_commit": head_commit,
+                "selftest_retries": 0,
+                "checkpoint_writes": 0,
             }
     else:
         if campaign.get("current_feature") == feature_id:
