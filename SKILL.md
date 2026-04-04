@@ -37,8 +37,8 @@ Your job is to preserve momentum across sessions while keeping state compact, ex
 Support the existing surface:
 
 ```text
-/harness "goal"
-/harness
+/harness "goal"    → INIT (new campaign with this goal)
+/harness           → RESUME (continue the active campaign)
 /harness status
 /harness review
 /harness focus F007
@@ -46,6 +46,10 @@ Support the existing surface:
 /harness skip F003
 /harness reset
 ```
+
+**Routing logic:**
+- `/harness "goal"`: If `.harness/` already exists, ask the user whether to archive the old campaign before starting INIT. Never archive silently.
+- `/harness` (no args): If `.harness/` exists, run Startup Rules then RESUME. If `.harness/` does not exist, tell the user no active campaign was found.
 
 Keep the user-facing commands unchanged. Internal flow is v2.
 
@@ -61,7 +65,6 @@ Human-readable:
 - `.harness/progress.md`
 
 Read these only when needed:
-- `resources/session-protocol.md`
 - `resources/state-machine.md`
 - `resources/features-schema.md`
 - `resources/contract-schema.md`
@@ -72,18 +75,51 @@ Read these only when needed:
 
 Before any phase except INIT:
 
-1. Run `python3 scripts/harness_validate.py`.
+1. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_validate.py`.
 2. Read `.harness/campaign.json` and `.harness/session-summary.json`.
-3. Read the current feature entry from `.harness/features.json` if `campaign.current_feature` is set.
+3. If `campaign.current_feature` is set, read only that feature's entry from `.harness/features.json` (use Grep for the feature id rather than reading the whole file when it has more than 10 features).
 4. Read `.harness/current-contract.json` if it exists.
-5. Read `resources/session-protocol.md` for the baseline startup sequence.
-6. Only `tail` recent lines from `.harness/progress.md` if structured files are missing or inconsistent.
+5. Only `tail` recent lines from `.harness/progress.md` if structured files are missing or inconsistent.
 
 If `features.json` still contains legacy `checkpoint_notes`, treat that as v1 state. The scripts will normalize it into `checkpoint` on write.
 
+### Resume Artifact Priority
+
+When deciding what happened last session, trust files in this order:
+
+1. `.harness/session-summary.json`
+2. `.harness/current-contract.json`
+3. `feature.checkpoint` in `.harness/features.json`
+4. recent lines from `.harness/progress.md`
+
+Do not reconstruct the entire campaign from the Markdown log unless the machine files are broken.
+
+### Environment Bootstrap
+
+Use this order when the environment needs setup:
+
+1. `campaign.bootstrap_command`
+2. `campaign.setup_command`
+3. `./.harness/init.sh` if the campaign created one
+
+If no bootstrap command exists, report that clearly instead of guessing.
+
+### Baseline Verification
+
+Prefer one quick smoke check before the full suite:
+
+1. Run the bootstrap command.
+2. Run one smoke check that proves the environment is alive.
+3. Run the full test suite only when:
+   - the smoke check fails
+   - `campaign.baseline_status` is `failing`
+   - the prior session ended with known failures
+
+Update `campaign.baseline_status` and refresh `session-summary.json` after baseline checks.
+
 ## INIT
 
-If `.harness/` does not exist:
+Precondition: `.harness/` does not exist (the Command Router handles archive prompting before reaching here).
 
 1. Explore the repo and determine test/bootstrap commands.
 2. Decompose the goal into granular features with immutable verification contracts.
@@ -96,7 +132,7 @@ If `.harness/` does not exist:
    - `.harness/progress.md`
 4. Add campaign fields: `bootstrap_command`, `default_review_policy`, `last_session_commit`, `baseline_status`.
 5. Set mode to `lite`, `standard`, or `heavy`.
-6. Run `python3 scripts/harness_summary.py` to seed `session-summary.json`.
+6. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py` to seed `session-summary.json`.
 7. Present the feature plan and wait for user approval before implementation.
 
 Use `resources/features-schema.md`, `resources/contract-schema.md`, and `resources/session-summary-schema.md` when authoring the initial files.
@@ -105,17 +141,18 @@ Use `resources/features-schema.md`, `resources/contract-schema.md`, and `resourc
 
 When no feature is in progress:
 
-1. Read `resources/state-machine.md`.
-2. Select the next feature with:
-   - `python3 scripts/harness_pick_next.py`
-   - or `python3 scripts/harness_pick_next.py --focus F007`
-3. Mark it in progress:
-   - `python3 scripts/harness_transition.py --feature-id F007 --to in_progress`
+1. Select the next feature with:
+   - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py`
+   - or `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py --focus F007`
+2. Mark it in progress:
+   - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress`
    - If another feature is already active, the transition must fail. Do not auto-switch.
-4. Create or refresh the active contract:
-   - `python3 scripts/harness_contract.py --feature-id F007`
-5. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
-6. Start implementation using task tracking and keep the contract small.
+3. Create or refresh the active contract:
+   - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007`
+4. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
+5. Start implementation using task tracking and keep the contract small.
+
+Allowed status transitions: `pending→in_progress`, `pending→skipped`, `in_progress→done`, `in_progress→blocked`, `blocked→pending`. The scripts enforce these; read `resources/state-machine.md` only if you need the full rules.
 
 ## CONTINUE
 
@@ -130,7 +167,7 @@ Do not rebuild context from the full campaign history unless structured state is
 
 ## During Implementation
 
-Use `python3 scripts/harness_checkpoint.py` at natural breakpoints, especially before a session handoff.
+Use `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py` at natural breakpoints, especially before a session handoff.
 It only applies to the active `in_progress` feature.
 
 Checkpoint contents must stay structured: `completed_steps`, `next_step`, `open_issues`, `files_touched`, `tests_run`, `last_updated`, `last_verified_commit`.
@@ -143,7 +180,7 @@ Always run self-test before completion:
 
 1. Run the campaign `test_command`.
 2. Run the active contract's `verification_commands`.
-3. Run the baseline smoke check from `resources/session-protocol.md`.
+3. Run the baseline smoke check (see Baseline Verification above).
 4. Update the checkpoint with the exact tests run.
 
 If self-test fails after repeated attempts, block the feature instead of hiding the problem.
@@ -163,19 +200,19 @@ Do not pass full `progress.md`, the full feature list, or unrelated historical n
 After self-test or QA pass:
 
 1. Transition the feature to done:
-   - `python3 scripts/harness_transition.py --feature-id F007 --to done`
-2. Run `python3 scripts/harness_summary.py`.
+   - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to done`
+2. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py`.
 3. Append one short entry to `.harness/progress.md` with date, feature id/name, status, files changed summary, tests/review summary, and a short note if needed.
 4. Recommend a fresh session before the next feature if the context is getting long.
 
 ## Command Behavior
 
-- `/harness status`: run `python3 scripts/harness_summary.py`
+- `/harness status`: run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py`
 - `/harness review`: run the current review policy immediately
-- `/harness focus F007`: select that feature if it is pending or already in progress
+- `/harness focus F007`: select that feature if it is pending or already in progress. If a different feature is currently `in_progress`, ask the user whether to block or complete it first — do not silently switch.
 - `/harness add`: user supplies the new feature metadata; then update `features.json` and refresh summary
-- `/harness skip F003`: `python3 scripts/harness_transition.py --feature-id F003 --to skipped`
-- `/harness reset`: archive `.harness/`, then start INIT again
+- `/harness skip F003`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F003 --to skipped`
+- `/harness reset`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py` to archive and clean, then start INIT again
 
 Blocked features must be moved back to `pending` before they can become `in_progress` again.
 `harness_contract.py` and `harness_checkpoint.py` only work for the active `in_progress` feature.
@@ -193,12 +230,12 @@ Keep the mode differences small. Do not fork the whole workflow by mode.
 Prefer these commands over manual edits:
 
 ```text
-python3 scripts/harness_validate.py
-python3 scripts/harness_summary.py
-python3 scripts/harness_pick_next.py
-python3 scripts/harness_transition.py --feature-id F007 --to in_progress
-python3 scripts/harness_contract.py --feature-id F007
-python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_validate.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 ```
 
 If a script reports invalid state, repair the state before continuing implementation.

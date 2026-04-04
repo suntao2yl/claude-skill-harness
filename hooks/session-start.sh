@@ -39,7 +39,7 @@ contract = load_json(contract_path) or {}
 counts = summary.get("progress_counts") or {}
 review_policy = contract.get("review_policy") or campaign.get("default_review_policy", "selftest")
 resume_steps = summary.get("resume_steps") or []
-next_step = resume_steps[0] if resume_steps else "Run python3 scripts/harness_summary.py for the latest resume step."
+next_step = resume_steps[0] if resume_steps else "Run harness_summary.py to get the latest resume step."
 known_failures = summary.get("known_failures") or []
 env_status = summary.get("environment_status") or campaign.get("baseline_status", "unknown")
 

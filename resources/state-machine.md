@@ -30,7 +30,7 @@ Disallowed examples:
 - `blocked -> in_progress`
 - `skipped -> pending`
 
-Use `python3 scripts/harness_transition.py` for all changes.
+Use `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py` for all changes.
 
 ## PICK Rules
 

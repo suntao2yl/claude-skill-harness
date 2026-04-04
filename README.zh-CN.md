@@ -17,7 +17,12 @@
 - 用 `session-summary.json` 作为默认恢复入口
 - 用确定性的 Python 脚本处理状态变更
 - 按风险决定是否进入完整 QA
-- 精简 `SKILL.md`，减少 skill 本身的 token 开销
+- 通过 `${CLAUDE_SKILL_DIR}` 使脚本路径可移植——不依赖安装位置
+- 新增 `harness_reset.py` 实现确定性的 campaign 归档
+- 命令路由明确：`/harness "goal"` → INIT，`/harness` → RESUME
+- `/harness focus` 切换前检查是否有 in_progress 冲突
+- 启动时只读取活跃 feature 条目，而非整个 `features.json`
+- `session-protocol.md` 合并到 SKILL.md，减少每次会话的 token 开销
 
 ## 关键文件
 
@@ -78,12 +83,13 @@
 ## 内置脚本
 
 ```bash
-python3 scripts/harness_validate.py
-python3 scripts/harness_summary.py
-python3 scripts/harness_pick_next.py
-python3 scripts/harness_transition.py --feature-id F007 --to in_progress
-python3 scripts/harness_contract.py --feature-id F007
-python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_validate.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py --label "phase-1"
 ```
 
 这些脚本只读写 `.harness/`，用于替代手工修改 JSON。
@@ -93,6 +99,7 @@ python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 - `harness_validate.py` 检测 git drift（HEAD 与上次验证提交的差异）以及循环依赖和悬空依赖。
 - `harness_checkpoint.py` 在未显式提供时自动从 `git diff` 提取 `files_touched`。
 - `harness_transition.py` 在 feature 完成时将契约归档到 feature 记录中（而非删除），阻塞时追加带时间戳的条目到 `blocked_history`。
+- `harness_reset.py` 将整个 campaign 归档到 `.harness/archive/<timestamp>_<label>/`，清理 `.harness/` 以便重新 INIT。
 
 ## 工作流
 
