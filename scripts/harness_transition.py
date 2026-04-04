@@ -58,17 +58,9 @@ def main() -> int:
                 f"Cannot start {feature_id} because {active_feature_id} is already in progress. "
                 "Transition the active feature out of in_progress first."
             )
-        other_active = [
-            item.get("id")
-            for item in features
-            if item.get("status") == "in_progress" and item.get("id") != feature_id
-        ]
-        if other_active:
-            raise SystemExit(
-                f"Cannot start {feature_id} because another feature is already in progress: {other_active[0]}."
-            )
     if target_status == "blocked" and not args.blocked_reason:
         raise SystemExit("--blocked-reason is required when transitioning to blocked")
+    head_commit = infer_git_commit(project_root)
     for note in args.session_note:
         if note.strip():
             feature.setdefault("sessions", []).append(
@@ -95,7 +87,7 @@ def main() -> int:
                 "files_touched": [],
                 "tests_run": [],
                 "last_updated": utc_now(),
-                "last_verified_commit": infer_git_commit(project_root),
+                "last_verified_commit": head_commit,
             }
     else:
         if campaign.get("current_feature") == feature_id:
@@ -110,7 +102,7 @@ def main() -> int:
     if target_status == "done":
         feature["blocked_reason"] = None
     campaign["last_session_date"] = args.last_session_date or utc_now().split("T", 1)[0]
-    campaign["last_session_commit"] = infer_git_commit(project_root)
+    campaign["last_session_commit"] = head_commit
     existing_summary = load_session_summary(project_root, required=False)
     contract = load_contract(project_root, required=False)
     summary = build_session_summary(campaign, features, contract, existing_summary)

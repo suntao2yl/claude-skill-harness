@@ -23,6 +23,7 @@ def main() -> int:
     campaign, features = load_state(project_root)
     selected = None
     reason = None
+    candidates = eligible_features(features)
     if args.focus:
         feature = get_feature(features, args.focus)
         status = feature.get("status")
@@ -41,14 +42,13 @@ def main() -> int:
         selected = get_feature(features, campaign["current_feature"])
         reason = "current in-progress feature"
     else:
-        candidates = eligible_features(features)
         if candidates:
             selected = candidates[0]
             reason = "highest-priority eligible pending feature"
     payload = {
         "selected": selected,
         "reason": reason,
-        "remaining_candidates": eligible_features(features),
+        "remaining_candidates": candidates,
     }
     if args.json:
         print(json.dumps(payload, indent=2))

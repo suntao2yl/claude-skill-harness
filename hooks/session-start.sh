@@ -66,21 +66,11 @@ if known_failures:
     for failure in known_failures[:5]:
         lines.append(f"  - {failure}")
 
-# Inject open_issues from current feature checkpoint if available
-features_path = campaign_path.parent / "features.json"
-current_id = summary.get("current_feature") or campaign.get("current_feature")
-if current_id:
-    features_data = load_json(features_path)
-    if features_data and isinstance(features_data, dict):
-        for f in features_data.get("features", []):
-            if f.get("id") == current_id:
-                cp = f.get("checkpoint") or {}
-                open_issues = cp.get("open_issues") or []
-                if open_issues:
-                    lines.append("Open issues from last checkpoint:")
-                    for issue in open_issues[:5]:
-                        lines.append(f"  - {issue}")
-                break
+open_issues = summary.get("open_issues") or []
+if open_issues:
+    lines.append("Open issues from last checkpoint:")
+    for issue in open_issues[:5]:
+        lines.append(f"  - {issue}")
 
 context = "\n".join(lines)
 

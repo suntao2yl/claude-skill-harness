@@ -10,10 +10,10 @@ from harness_lib import (
     VALID_REVIEW_POLICIES,
     build_contract,
     build_session_summary,
-    get_feature,
     load_session_summary,
     load_state,
     project_root_arg,
+    require_active_feature,
     save_state,
     write_contract,
     write_session_summary,
@@ -39,21 +39,7 @@ def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
     campaign, features = load_state(project_root)
-    feature_id = args.feature_id or campaign.get("current_feature")
-    if not feature_id:
-        raise SystemExit("No active feature. Transition a feature to in_progress before creating a contract.")
-    active_feature_id = campaign.get("current_feature")
-    if not active_feature_id:
-        raise SystemExit("campaign.current_feature is empty. Start a feature before creating a contract.")
-    if feature_id != active_feature_id:
-        raise SystemExit(
-            f"Cannot create a contract for {feature_id}. The active feature is {active_feature_id}."
-        )
-    feature = get_feature(features, feature_id)
-    if feature.get("status") != "in_progress":
-        raise SystemExit(
-            f"Cannot create a contract for {feature_id} because its status is {feature.get('status')}."
-        )
+    feature_id, feature = require_active_feature(campaign, features, args.feature_id, verb="create a contract for")
     contract = build_contract(
         feature,
         campaign,

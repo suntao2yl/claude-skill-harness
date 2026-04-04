@@ -55,6 +55,11 @@ Use this schema when creating `.harness/session-summary.json`.
       "type": "array",
       "items": { "type": "string" }
     },
+    "open_issues": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Open issues from the current feature's checkpoint, folded in so the hook avoids reading features.json."
+    },
     "environment_status": {
       "type": "string"
     },

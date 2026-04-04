@@ -9,13 +9,13 @@ import json
 from harness_lib import (
     build_session_summary,
     dedupe,
-    get_feature,
     infer_git_changed_files,
     infer_git_commit,
     load_contract,
     load_session_summary,
     load_state,
     project_root_arg,
+    require_active_feature,
     save_state,
     utc_now,
     write_session_summary,
@@ -40,21 +40,7 @@ def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
     campaign, features = load_state(project_root)
-    feature_id = args.feature_id or campaign.get("current_feature")
-    if not feature_id:
-        raise SystemExit("No feature id supplied and campaign.current_feature is empty.")
-    active_feature_id = campaign.get("current_feature")
-    if not active_feature_id:
-        raise SystemExit("campaign.current_feature is empty. Only the active in_progress feature can be checkpointed.")
-    if feature_id != active_feature_id:
-        raise SystemExit(
-            f"Cannot checkpoint {feature_id}. The active feature is {active_feature_id}."
-        )
-    feature = get_feature(features, feature_id)
-    if feature.get("status") != "in_progress":
-        raise SystemExit(
-            f"Cannot checkpoint {feature_id} because its status is {feature.get('status')}."
-        )
+    feature_id, feature = require_active_feature(campaign, features, args.feature_id, verb="checkpoint")
     files_touched = args.file_touched
     if not files_touched:
         existing_checkpoint = feature.get("checkpoint") or {}

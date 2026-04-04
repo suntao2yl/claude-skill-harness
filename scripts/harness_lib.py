@@ -265,6 +265,28 @@ def get_feature(features: List[Dict[str, Any]], feature_id: str) -> Dict[str, An
     raise ValueError(f"Unknown feature id: {feature_id}")
 
 
+def require_active_feature(
+    campaign: Dict[str, Any],
+    features: List[Dict[str, Any]],
+    feature_id: Optional[str],
+    *,
+    verb: str = "operate on",
+) -> Tuple[str, Dict[str, Any]]:
+    """Resolve and validate the active in_progress feature. Returns (feature_id, feature)."""
+    feature_id = feature_id or campaign.get("current_feature")
+    if not feature_id:
+        raise SystemExit(f"No feature id supplied and campaign.current_feature is empty.")
+    active_feature_id = campaign.get("current_feature")
+    if not active_feature_id:
+        raise SystemExit(f"campaign.current_feature is empty. Cannot {verb} without an active feature.")
+    if feature_id != active_feature_id:
+        raise SystemExit(f"Cannot {verb} {feature_id}. The active feature is {active_feature_id}.")
+    feature = get_feature(features, feature_id)
+    if feature.get("status") != "in_progress":
+        raise SystemExit(f"Cannot {verb} {feature_id} because its status is {feature.get('status')}.")
+    return feature_id, feature
+
+
 def validate_dependencies(features: List[Dict[str, Any]]) -> List[str]:
     """Detect dangling references and circular dependencies."""
     errors: List[str] = []
@@ -634,6 +656,17 @@ def build_session_summary(
     summary["environment_status"] = environment_status or campaign.get("baseline_status", "unknown")
     summary["last_session_date"] = campaign.get("last_session_date", "")
     summary["last_session_commit"] = campaign.get("last_session_commit")
+    # Fold open_issues from the current feature's checkpoint into the summary
+    current_id = campaign.get("current_feature")
+    open_issues: List[str] = []
+    if current_id:
+        try:
+            feature = get_feature(features, current_id)
+            checkpoint = feature.get("checkpoint") or {}
+            open_issues = [str(i) for i in (checkpoint.get("open_issues") or [])]
+        except ValueError:
+            pass
+    summary["open_issues"] = dedupe(open_issues)
     return summary
 
 
@@ -690,7 +723,7 @@ def validate_campaign(campaign: Dict[str, Any]) -> List[str]:
         errors.append(f"campaign.mode must be one of {sorted(VALID_MODES)}")
     if campaign.get("default_review_policy") not in VALID_REVIEW_POLICIES:
         errors.append("campaign.default_review_policy must be 'selftest' or 'qa'")
-    if campaign.get("baseline_status") not in {"unknown", "passing", "failing"}:
+    if campaign.get("baseline_status") not in ENVIRONMENT_STATUSES:
         errors.append("campaign.baseline_status must be unknown, passing, or failing")
     if campaign.get("current_feature") is not None and not isinstance(campaign.get("current_feature"), str):
         errors.append("campaign.current_feature must be a string or null")
@@ -736,6 +769,8 @@ def validate_session_summary(summary: Dict[str, Any], feature_ids: Iterable[str]
         errors.append("session-summary.resume_steps must be an array")
     if not isinstance(summary.get("known_failures"), list):
         errors.append("session-summary.known_failures must be an array")
+    if not isinstance(summary.get("open_issues"), list):
+        errors.append("session-summary.open_issues must be an array")
     if not isinstance(summary.get("environment_status"), str):
         errors.append("session-summary.environment_status must be a string")
     return errors
