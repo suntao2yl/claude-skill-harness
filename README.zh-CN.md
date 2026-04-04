@@ -48,6 +48,7 @@
 ### `features.json`
 
 保存 feature 列表、不可变的 `verification`，以及结构化 `checkpoint`。
+每个 feature 还包含 `blocked_history`（带时间戳的阻塞/解除记录，上限 10 条）和 `archived_contract`（feature 完成时保存的契约快照）。
 
 ### `current-contract.json`
 
@@ -61,6 +62,7 @@
 - `verification_commands`
 - `manual_checks`
 - `review_policy`
+- `execution_context` — 验证命令的工作目录和超时设置
 
 ### `session-summary.json`
 
@@ -86,6 +88,11 @@ python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 
 这些脚本只读写 `.harness/`，用于替代手工修改 JSON。
 其中 `harness_contract.py` 和 `harness_checkpoint.py` 只允许作用于当前激活且处于 `in_progress` 的 feature，`harness_transition.py` 会拒绝创建第二个活跃 feature。
+
+脚本关键行为：
+- `harness_validate.py` 检测 git drift（HEAD 与上次验证提交的差异）以及循环依赖和悬空依赖。
+- `harness_checkpoint.py` 在未显式提供时自动从 `git diff` 提取 `files_touched`。
+- `harness_transition.py` 在 feature 完成时将契约归档到 feature 记录中（而非删除），阻塞时追加带时间戳的条目到 `blocked_history`。
 
 ## 工作流
 
@@ -125,14 +132,17 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 }
 ```
 
-hook 只注入：
+hook 注入：
 
 - 目标
 - 进度计数
 - 当前 feature
 - review policy
+- 环境状态（baseline failing 时显示警告）
 - 上次会话日期
 - 一行 next step
+- 已知失败项（最多 5 条）
+- 当前 feature 上次 checkpoint 的 open issues（最多 5 条）
 
 ## 安装
 

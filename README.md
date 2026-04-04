@@ -48,6 +48,7 @@ Campaign metadata and defaults:
 ### `features.json`
 
 Feature tracking with immutable `verification` and structured `checkpoint` objects.
+Each feature also carries `blocked_history` (timestamped block/unblock log, capped at 10) and `archived_contract` (the contract snapshot saved when a feature completes).
 
 ### `current-contract.json`
 
@@ -61,6 +62,7 @@ The active feature contract:
 - `verification_commands`
 - `manual_checks`
 - `review_policy`
+- `execution_context` — working directory and timeout for verification commands
 
 ### `session-summary.json`
 
@@ -86,6 +88,11 @@ python3 scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 
 These scripts only operate on `.harness/` and are meant to replace hand-edited JSON for common state transitions.
 `harness_contract.py` and `harness_checkpoint.py` only work on the active `in_progress` feature, and `harness_transition.py` refuses to create a second active feature.
+
+Key script behaviors:
+- `harness_validate.py` checks for git drift (HEAD vs last verified commit) and detects circular or dangling feature dependencies.
+- `harness_checkpoint.py` auto-extracts `files_touched` from `git diff` when not explicitly provided.
+- `harness_transition.py` archives the active contract into the feature record on completion (instead of deleting it) and appends timestamped entries to `blocked_history` when blocking.
 
 ## Workflow
 
@@ -125,14 +132,17 @@ Configure a hook so each new Claude session sees a compact campaign summary:
 }
 ```
 
-The hook only injects:
+The hook injects:
 
 - goal
 - progress counts
 - current feature
 - review policy
+- environment status (with a warning when baseline is failing)
 - last session date
 - one next-step line
+- known failures (up to 5)
+- open issues from the current feature's last checkpoint (up to 5)
 
 ## Install
 
