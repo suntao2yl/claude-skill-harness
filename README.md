@@ -26,6 +26,7 @@ Harness v2 keeps the `/harness` command surface the same, but swaps the internal
 - retry escalation: `selftest_retries` counter auto-blocks after 3 consecutive failures
 - session freshness signals: `checkpoint_writes`, completed step count, and session feature count trigger new-session recommendations
 - parallel sub-task guidance: use Agent tool for independent work within a single feature
+- auto-advance by default: only INIT plan approval, destructive actions, and QA review pause for confirmation
 
 ## Core files
 

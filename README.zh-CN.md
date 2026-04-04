@@ -26,6 +26,7 @@
 - 重试升级：`selftest_retries` 计数器连续失败 3 次后自动 block
 - 会话新鲜度信号：`checkpoint_writes`、已完成步骤数、会话内完成 feature 数触发换会话建议
 - 并行子任务指导：在单个 feature 内使用 Agent tool 并行处理独立子任务
+- 默认自动推进：仅 INIT 计划审批、破坏性操作和 QA 审查需要人工确认
 
 ## 关键文件
 
