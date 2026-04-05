@@ -10,7 +10,7 @@ Built from the same core ideas described in Anthropic Engineering's long-running
 
 ## What changed in v2
 
-Harness v2 keeps the `/harness` command surface the same, but swaps the internal recovery model:
+Harness v2 keeps the `/harness-plan` command surface the same, but swaps the internal recovery model:
 
 - compact machine state instead of free-text recovery
 - one active `current-contract.json` per feature
@@ -19,8 +19,8 @@ Harness v2 keeps the `/harness` command surface the same, but swaps the internal
 - risk-gated QA instead of always-on full reviewer loops
 - portable script paths via `${CLAUDE_SKILL_DIR}` — works regardless of install location
 - `harness_reset.py` for deterministic campaign archiving
-- command router with explicit routing: `/harness "goal"` → INIT, `/harness` → RESUME
-- `/harness focus` checks for in-progress conflicts before switching
+- command router with explicit routing: `/harness-plan "goal"` → INIT, `/harness-plan` → RESUME
+- `/harness-plan focus` checks for in-progress conflicts before switching
 - startup reads only the active feature from `features.json`, not the entire file
 - session-protocol.md merged into SKILL.md to reduce per-session token overhead
 - retry escalation: `selftest_retries` counter auto-blocks after 3 consecutive failures
@@ -127,23 +127,7 @@ Use `qa` when the active feature touches UI flows, auth, payments, migrations, c
 
 ## SessionStart hook
 
-Configure a hook so each new Claude session sees a compact campaign summary:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "~/.claude/skills/harness/hooks/session-start.sh"
-      }]
-    }]
-  }
-}
-```
-
-The hook injects:
+The plugin automatically registers a SessionStart hook on install. Each new session sees a compact campaign summary injected:
 
 - goal
 - progress counts
@@ -158,7 +142,9 @@ The hook injects:
 ## Install
 
 ```bash
-npx skills add suntao2yl/claude-skill-harness
+# As a plugin (recommended)
+/plugin marketplace add suntao2yl/claude-skill-harness
+/plugin install harness-plan@suntao-skills
 ```
 
 ## License

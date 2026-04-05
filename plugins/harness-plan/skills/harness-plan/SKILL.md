@@ -1,6 +1,6 @@
 ---
-name: harness
-description: "Long-running task harness for multi-session campaigns. Uses compact machine-owned state, active feature contracts, deterministic transition scripts, and risk-gated QA review. Triggers: /harness, campaign, long task, multi-session, feature tracking"
+name: harness-plan
+description: "Long-running task harness for multi-session campaigns. Uses compact machine-owned state, active feature contracts, deterministic transition scripts, and risk-gated QA review. Triggers: /harness-plan, campaign, long task, multi-session, feature tracking"
 allowed-tools:
   - Read
   - Write
@@ -38,19 +38,19 @@ Your job is to preserve momentum across sessions while keeping state compact, ex
 Support the existing surface:
 
 ```text
-/harness "goal"    → INIT (new campaign with this goal)
-/harness           → RESUME (continue the active campaign)
-/harness status
-/harness review
-/harness focus F007
-/harness add "feature description"
-/harness skip F003
-/harness reset
+/harness-plan "goal"    → INIT (new campaign with this goal)
+/harness-plan           → RESUME (continue the active campaign)
+/harness-plan status
+/harness-plan review
+/harness-plan focus F007
+/harness-plan add "feature description"
+/harness-plan skip F003
+/harness-plan reset
 ```
 
 **Routing logic:**
-- `/harness "goal"`: If `.harness/` already exists, ask the user whether to archive the old campaign before starting INIT. Never archive silently.
-- `/harness` (no args): If `.harness/` exists, run Startup Rules then RESUME. If `.harness/` does not exist, tell the user no active campaign was found.
+- `/harness-plan "goal"`: If `.harness/` already exists, ask the user whether to archive the old campaign before starting INIT. Never archive silently.
+- `/harness-plan` (no args): If `.harness/` exists, run Startup Rules then RESUME. If `.harness/` does not exist, tell the user no active campaign was found.
 
 Keep the user-facing commands unchanged. Internal flow is v2.
 
@@ -227,12 +227,12 @@ These are hard signals, not suggestions. When they appear, checkpoint the curren
 
 ## Command Behavior
 
-- `/harness status`: run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py`
-- `/harness review`: run the current review policy immediately
-- `/harness focus F007`: select that feature if it is pending or already in progress. If a different feature is currently `in_progress`, ask the user whether to block or complete it first — do not silently switch.
-- `/harness add`: user supplies the new feature metadata; then update `features.json` and refresh summary
-- `/harness skip F003`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F003 --to skipped`
-- `/harness reset`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py` to archive and clean, then start INIT again
+- `/harness-plan status`: run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py`
+- `/harness-plan review`: run the current review policy immediately
+- `/harness-plan focus F007`: select that feature if it is pending or already in progress. If a different feature is currently `in_progress`, ask the user whether to block or complete it first — do not silently switch.
+- `/harness-plan add`: user supplies the new feature metadata; then update `features.json` and refresh summary
+- `/harness-plan skip F003`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F003 --to skipped`
+- `/harness-plan reset`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py` to archive and clean, then start INIT again
 
 Blocked features must be moved back to `pending` before they can become `in_progress` again.
 `harness_contract.py` and `harness_checkpoint.py` only work for the active `in_progress` feature.

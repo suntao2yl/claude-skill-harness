@@ -1,0 +1,24 @@
+{
+  "name": "harness-plan",
+  "description": "Long-running task harness for multi-session development campaigns. Compact state, active feature contracts, deterministic transition scripts, risk-gated QA review.",
+  "version": "0.1.0",
+  "author": {
+    "name": "suntao2yl"
+  },
+  "homepage": "https://github.com/suntao2yl/claude-skill-harness",
+  "repository": "https://github.com/suntao2yl/claude-skill-harness",
+  "license": "MIT",
+  "keywords": ["harness", "campaign", "multi-session", "workflow", "orchestration", "long-running-tasks"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

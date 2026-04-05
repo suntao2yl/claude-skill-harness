@@ -10,7 +10,7 @@
 
 ## v2 的核心变化
 
-`/harness` 的外部命令保持不变，但内部恢复与交接逻辑改成了：
+`/harness-plan` 的外部命令保持不变，但内部恢复与交接逻辑改成了：
 
 - 用紧凑的机器状态替代自由文本断点
 - 每个进行中 feature 只有一个 `current-contract.json`
@@ -19,8 +19,8 @@
 - 按风险决定是否进入完整 QA
 - 通过 `${CLAUDE_SKILL_DIR}` 使脚本路径可移植——不依赖安装位置
 - 新增 `harness_reset.py` 实现确定性的 campaign 归档
-- 命令路由明确：`/harness "goal"` → INIT，`/harness` → RESUME
-- `/harness focus` 切换前检查是否有 in_progress 冲突
+- 命令路由明确：`/harness-plan "goal"` → INIT，`/harness-plan` → RESUME
+- `/harness-plan focus` 切换前检查是否有 in_progress 冲突
 - 启动时只读取活跃 feature 条目，而非整个 `features.json`
 - `session-protocol.md` 合并到 SKILL.md，减少每次会话的 token 开销
 - 重试升级：`selftest_retries` 计数器连续失败 3 次后自动 block
@@ -127,23 +127,7 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 
 ## SessionStart hook
 
-可在新会话启动时自动注入紧凑状态：
-
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "~/.claude/skills/harness/hooks/session-start.sh"
-      }]
-    }]
-  }
-}
-```
-
-hook 注入：
+安装 plugin 后会自动注册 SessionStart hook,在新会话启动时注入紧凑状态:
 
 - 目标
 - 进度计数
@@ -158,7 +142,9 @@ hook 注入：
 ## 安装
 
 ```bash
-npx skills add suntao2yl/claude-skill-harness
+# 作为 plugin 安装(推荐)
+/plugin marketplace add suntao2yl/claude-skill-harness
+/plugin install harness-plan@suntao-skills
 ```
 
 ## License
