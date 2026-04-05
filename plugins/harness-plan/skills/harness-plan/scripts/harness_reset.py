@@ -77,7 +77,7 @@ def main() -> int:
             item.unlink()
 
     print(f"Archived. .harness/ is now clean (archive/ preserved).")
-    print("Run /harness to start a new INIT.")
+    print("Run /harness-plan to start a new INIT.")
     return 0
 
 
