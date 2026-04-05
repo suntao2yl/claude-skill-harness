@@ -17,6 +17,7 @@ from harness_lib import (
     load_state,
     project_root_arg,
     remove_contract,
+    require_harness,
     save_state,
     utc_now,
     write_session_summary,
@@ -38,6 +39,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
+    require_harness(project_root)
     campaign, features = load_state(project_root)
     feature_id = args.feature_id or campaign.get("current_feature")
     if not feature_id:

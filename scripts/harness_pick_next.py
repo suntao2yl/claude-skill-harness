@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from harness_lib import eligible_features, get_feature, load_state, project_root_arg
+from harness_lib import eligible_features, get_feature, load_state, project_root_arg, require_harness
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
+    require_harness(project_root)
     campaign, features = load_state(project_root)
     selected = None
     reason = None

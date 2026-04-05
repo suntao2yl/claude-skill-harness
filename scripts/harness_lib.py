@@ -27,12 +27,43 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _find_harness_root(start: Path) -> Optional[Path]:
+    """Walk up from *start* looking for a directory that contains .harness/."""
+    current = start.resolve()
+    for _ in range(current.parts.__len__()):
+        if (current / ".harness").is_dir():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
 def project_root_arg(value: Optional[str]) -> Path:
-    return Path(value or ".").resolve()
+    if value and value != ".":
+        return Path(value).resolve()
+    # No explicit root: walk up from cwd to find .harness/
+    found = _find_harness_root(Path.cwd())
+    return found if found else Path(".").resolve()
 
 
 def harness_dir(project_root: Path) -> Path:
     return project_root / ".harness"
+
+
+def require_harness(project_root: Path) -> None:
+    """Exit with a clear message if no .harness/ directory exists."""
+    d = harness_dir(project_root)
+    if not d.is_dir():
+        print(
+            f"No .harness/ directory at {d}.\n"
+            f"Resolved project root: {project_root}\n"
+            f"Working directory: {Path.cwd()}\n"
+            f"Hint: pass --project-root <path> if the working directory is not the project root.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def harness_file(project_root: Path, name: str) -> Path:
@@ -259,7 +290,10 @@ def load_session_summary(project_root: Path, required: bool = False) -> Optional
 
 def write_session_summary(project_root: Path, payload: Dict[str, Any]) -> None:
     ensure_harness_dir(project_root)
-    write_json(harness_file(project_root, "session-summary.json"), payload)
+    # freshness_warnings are runtime-only signals — never persist them,
+    # otherwise a new session reads stale warnings from the previous session.
+    cleaned = {k: v for k, v in payload.items() if k != "freshness_warnings"}
+    write_json(harness_file(project_root, "session-summary.json"), cleaned)
 
 
 def get_feature(features: List[Dict[str, Any]], feature_id: str) -> Dict[str, Any]:
@@ -673,8 +707,9 @@ def build_session_summary(
     summary["open_issues"] = dedupe(open_issues)
     # Session freshness indicators
     freshness_warnings: List[str] = []
-    done_count = counts.get("done", 0) + counts.get("completed", 0)
-    session_done = done_count - (existing_summary or {}).get("progress_counts", {}).get("done", 0)
+    done_count = counts.get("done", 0)
+    prev_done = (existing_summary or {}).get("progress_counts", {}).get("done", 0)
+    session_done = done_count - prev_done
     if session_done >= 2:
         freshness_warnings.append(f"{session_done} features completed this session — consider a fresh session.")
     if current_id:

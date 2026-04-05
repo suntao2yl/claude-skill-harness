@@ -15,6 +15,7 @@ from harness_lib import (
     load_session_summary,
     load_state,
     project_root_arg,
+    require_harness,
     write_session_summary,
 )
 
@@ -32,6 +33,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
+    require_harness(project_root)
     campaign, features = load_state(project_root)
     contract = load_contract(project_root, required=False)
     existing_summary = load_session_summary(project_root, required=False)

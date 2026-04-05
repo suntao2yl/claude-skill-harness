@@ -16,6 +16,7 @@ from harness_lib import (
     load_state,
     project_root_arg,
     require_active_feature,
+    require_harness,
     save_state,
     utc_now,
     write_session_summary,
@@ -40,6 +41,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = project_root_arg(args.project_root)
+    require_harness(project_root)
     campaign, features = load_state(project_root)
     feature_id, feature = require_active_feature(campaign, features, args.feature_id, verb="checkpoint")
     existing_checkpoint = feature.get("checkpoint") or {}
