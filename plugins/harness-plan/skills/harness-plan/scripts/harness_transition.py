@@ -68,6 +68,7 @@ def main() -> int:
             feature.setdefault("sessions", []).append(
                 {"note": note.strip(), "timestamp": utc_now()}
             )
+    feature["sessions"] = feature.get("sessions", [])[-20:]
     feature["status"] = target_status
     if target_status == "blocked":
         feature["blocked_reason"] = args.blocked_reason.strip()

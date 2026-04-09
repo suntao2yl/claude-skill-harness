@@ -60,7 +60,15 @@ Use this schema when creating `.harness/features-schema.json`.
           },
           "sessions": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "object",
+              "properties": {
+                "note": { "type": "string" },
+                "timestamp": { "type": "string" }
+              },
+              "required": ["note", "timestamp"],
+              "additionalProperties": false
+            },
             "default": []
           },
           "blocked_reason": {
@@ -123,6 +131,25 @@ Use this schema when creating `.harness/features-schema.json`.
             "items": { "type": "string" },
             "default": null,
             "description": "Optional in lite mode; expected in standard and heavy mode."
+          },
+          "blocked_history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string" },
+                "timestamp": { "type": "string" }
+              },
+              "required": ["reason", "timestamp"],
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Capped at 10 most recent entries."
+          },
+          "archived_contract": {
+            "type": ["object", "null"],
+            "default": null,
+            "description": "Snapshot of the contract at completion."
           }
         },
         "additionalProperties": false

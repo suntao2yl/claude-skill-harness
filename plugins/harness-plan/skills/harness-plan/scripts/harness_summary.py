@@ -9,7 +9,6 @@ import json
 from harness_lib import (
     ENVIRONMENT_STATUSES,
     build_session_summary,
-    count_statuses,
     format_summary_lines,
     load_contract,
     load_session_summary,
@@ -53,7 +52,7 @@ def main() -> int:
     review_policy = (contract or {}).get("review_policy", campaign.get("default_review_policy", "selftest"))
     write_session_summary(project_root, summary)
     if args.json:
-        print(json.dumps({"summary": summary, "review_policy": review_policy, "counts": count_statuses(features)}, indent=2))
+        print(json.dumps({"summary": summary, "review_policy": review_policy, "counts": summary["progress_counts"]}, indent=2))
     else:
         print("\n".join(format_summary_lines(summary, review_policy)))
     return 0

@@ -11,10 +11,10 @@
     {
       "name": "harness-plan",
       "source": "./plugins/harness-plan",
-      "description": "Long-running task harness for multi-session development campaigns",
+      "description": "Long-running task harness for multi-session development campaigns. Compact state, active feature contracts, deterministic transition scripts, risk-gated QA review.",
       "version": "0.1.0",
       "category": "workflow",
-      "tags": ["harness", "campaign", "multi-session", "orchestration"]
+      "tags": ["harness", "campaign", "multi-session", "workflow", "orchestration", "long-running-tasks"]
     }
   ]
 }
