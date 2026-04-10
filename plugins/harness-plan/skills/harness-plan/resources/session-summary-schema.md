@@ -69,9 +69,24 @@ Use this schema when creating `.harness/session-summary.json`.
     },
     "last_session_commit": {
       "type": ["string", "null"]
+    },
+    "session_step_count": {
+      "type": "integer",
+      "default": 0,
+      "description": "Number of checkpoint writes in the current session. Resets when session_id changes."
+    },
+    "session_id": {
+      "type": ["integer", "null"],
+      "description": "Tracks campaign.session_count to detect session boundaries."
+    },
+    "handoff_reason": {
+      "type": ["string", "null"],
+      "enum": ["freshness", "blocked", "completed", "interrupted", null],
+      "default": null,
+      "description": "Why the previous session ended. Helps the next session understand context."
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
 ```
 

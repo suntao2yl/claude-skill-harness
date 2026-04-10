@@ -31,6 +31,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--to", required=True, help="Target status")
     parser.add_argument("--session-note", action="append", default=[], help="Session note to append to feature.sessions")
     parser.add_argument("--blocked-reason", help="Required when transitioning to blocked")
+    parser.add_argument("--diagnostic-command", help="Command that was run when the block was discovered")
+    parser.add_argument("--diagnostic-output", help="Relevant output from the diagnostic command")
+    parser.add_argument("--suggested-fix", help="Suggested approach for unblocking")
     parser.add_argument("--last-session-date", help="Optional YYYY-MM-DD override")
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     return parser.parse_args()
@@ -68,9 +71,14 @@ def main() -> int:
     feature["status"] = target_status
     if target_status == "blocked":
         feature["blocked_reason"] = args.blocked_reason.strip()
-        feature.setdefault("blocked_history", []).append(
-            {"reason": args.blocked_reason.strip(), "timestamp": utc_now()}
-        )
+        entry = {"reason": args.blocked_reason.strip(), "timestamp": utc_now()}
+        if args.diagnostic_command or args.diagnostic_output or args.suggested_fix:
+            entry["diagnostic"] = {
+                "command": args.diagnostic_command,
+                "output": (args.diagnostic_output or "")[:500],
+                "suggested_fix": args.suggested_fix,
+            }
+        feature.setdefault("blocked_history", []).append(entry)
         feature["blocked_history"] = feature["blocked_history"][-10:]
     else:
         feature["blocked_reason"] = None

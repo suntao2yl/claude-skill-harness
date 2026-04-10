@@ -25,6 +25,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--environment-status", choices=sorted(ENVIRONMENT_STATUSES))
     parser.add_argument("--resume-step", action="append", default=[], help="Override or prepend resume step")
     parser.add_argument("--known-failure", action="append", default=[], help="Add known failure entry")
+    parser.add_argument("--handoff-reason", choices=["freshness", "blocked", "completed", "interrupted"],
+                        help="Why the session is ending")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of text")
     return parser.parse_args()
 
@@ -48,6 +50,7 @@ def main() -> int:
         environment_status=args.environment_status,
         resume_steps=resume_steps,
         known_failures=known_failures,
+        handoff_reason=args.handoff_reason,
     )
     review_policy = (contract or {}).get("review_policy", campaign.get("default_review_policy", "selftest"))
     write_session_summary(project_root, summary)

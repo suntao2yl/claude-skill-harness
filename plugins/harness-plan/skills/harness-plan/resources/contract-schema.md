@@ -66,9 +66,22 @@ Use this schema when creating `.harness/contract-schema.json` or when validating
     },
     "updated_at": {
       "type": "string"
+    },
+    "command_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "original": { "type": "string" },
+          "replacement": { "type": "string" },
+          "timestamp": { "type": "string" }
+        }
+      },
+      "default": [],
+      "description": "Tracks verification command refinements during implementation."
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
 ```
 

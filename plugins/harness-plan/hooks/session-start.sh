@@ -58,6 +58,10 @@ lines = [
     f"Next: {next_step}",
 ]
 
+handoff = summary.get("handoff_reason")
+if handoff:
+    lines.append(f"Previous session ended: {handoff}")
+
 if env_status == "failing":
     lines.append("WARNING: Baseline environment is FAILING. Run bootstrap/setup before continuing.")
 
@@ -71,6 +75,12 @@ if open_issues:
     lines.append("Open issues from last checkpoint:")
     for issue in open_issues[:5]:
         lines.append(f"  - {issue}")
+
+last_failure = summary.get("last_selftest_failure")
+if last_failure and isinstance(last_failure, dict):
+    cmd = last_failure.get("command", "unknown command")
+    err = last_failure.get("error_summary", "no details")
+    lines.append(f"Last selftest failure: {cmd} — {err}")
 
 context = "\n".join(lines)
 

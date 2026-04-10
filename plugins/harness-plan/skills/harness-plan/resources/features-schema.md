@@ -50,6 +50,12 @@ Use this schema when creating `.harness/features-schema.json`.
             "minimum": 1,
             "maximum": 5
           },
+          "complexity": {
+            "type": ["string", "null"],
+            "enum": ["small", "medium", "large", null],
+            "default": null,
+            "description": "Optional size estimate. Small features get lite contracts in standard mode."
+          },
           "dependencies": {
             "type": "array",
             "items": {
@@ -113,6 +119,28 @@ Use this schema when creating `.harness/features-schema.json`.
                 "type": "integer",
                 "default": 0,
                 "description": "Number of checkpoint writes in this feature. Used for session freshness signals."
+              },
+              "last_failure": {
+                "type": ["object", "null"],
+                "default": null,
+                "description": "Structured record of the most recent selftest failure.",
+                "properties": {
+                  "command": { "type": "string" },
+                  "error_summary": { "type": "string" },
+                  "affected_files": { "type": "array", "items": { "type": "string" } },
+                  "timestamp": { "type": "string" }
+                }
+              },
+              "verification_runs": {
+                "type": "integer",
+                "default": 0,
+                "description": "Number of quick-verify runs during implementation."
+              },
+              "manual_checks_completed": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "description": "Manual checks from the contract that have been verified."
               }
             },
             "required": [
@@ -124,7 +152,7 @@ Use this schema when creating `.harness/features-schema.json`.
               "last_updated",
               "last_verified_commit"
             ],
-            "additionalProperties": false
+            "additionalProperties": true
           },
           "acceptance_checklist": {
             "type": ["array", "null"],
@@ -138,10 +166,17 @@ Use this schema when creating `.harness/features-schema.json`.
               "type": "object",
               "properties": {
                 "reason": { "type": "string" },
-                "timestamp": { "type": "string" }
+                "timestamp": { "type": "string" },
+                "diagnostic": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "command": { "type": ["string", "null"] },
+                    "output": { "type": ["string", "null"] },
+                    "suggested_fix": { "type": ["string", "null"] }
+                  }
+                }
               },
-              "required": ["reason", "timestamp"],
-              "additionalProperties": false
+              "required": ["reason", "timestamp"]
             },
             "default": [],
             "description": "Capped at 10 most recent entries."

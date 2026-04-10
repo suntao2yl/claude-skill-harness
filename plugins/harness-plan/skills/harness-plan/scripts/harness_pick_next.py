@@ -13,6 +13,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", default=".", help="Project root containing .harness/")
     parser.add_argument("--focus", help="Specific feature id to inspect")
+    parser.add_argument("--prefer-small", action="store_true",
+                        help="Prefer small-complexity features when context is heavy")
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     return parser.parse_args()
 
@@ -24,7 +26,7 @@ def main() -> int:
     campaign, features = load_state(project_root)
     selected = None
     reason = None
-    candidates = eligible_features(features)
+    candidates = eligible_features(features, prefer_small=args.prefer_small)
     if args.focus:
         feature = get_feature(features, args.focus)
         status = feature.get("status")

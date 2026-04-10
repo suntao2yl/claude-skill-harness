@@ -26,7 +26,7 @@ Your job is to preserve momentum across sessions while keeping state compact, ex
 
 1. All cross-session state lives in `.harness/`.
 2. Work only one feature at a time.
-3. `verification` in `features.json` is immutable unless the user changes it.
+3. `verification` in `features.json` is immutable unless the user changes it. `verification_commands` in `current-contract.json` CAN be refined during implementation using `harness_contract.py --update-command "old" "new"` — the claim is immutable, the how-to-check can evolve.
 4. Treat `.harness/current-contract.json` as the only active implementation contract.
 5. Treat `.harness/session-summary.json` as the default resume artifact.
 6. Use QA review only when the active contract's `review_policy` is `qa`.
@@ -151,7 +151,9 @@ When no feature is in progress:
 3. Create or refresh the active contract:
    - `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007`
 4. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
-5. Start implementation immediately using task tracking. Do not ask "should I start?" — the PICK decision is the go-ahead.
+5. Review the contract output for warnings. If `verification_commands` reference non-existent test files, create the test file as part of implementation or refine the command with `harness_contract.py --update-command "old" "new"`.
+6. Start implementation immediately using task tracking. Do not ask "should I start?" — the PICK decision is the go-ahead.
+7. When session freshness signals are approaching limits, use `harness_pick_next.py --prefer-small` to maximize throughput before handoff. Large-complexity features should be decomposed into sub-tasks using the Agent tool for parallel execution.
 
 Allowed status transitions: `backlog→pending`, `backlog→in_progress`, `backlog→skipped`, `pending→in_progress`, `pending→skipped`, `in_progress→done`, `in_progress→blocked`, `blocked→pending`. The scripts enforce these; read `resources/state-machine.md` only if you need the full rules.
 
@@ -173,6 +175,10 @@ It only applies to the active `in_progress` feature.
 
 Checkpoint contents must stay structured: `completed_steps`, `next_step`, `open_issues`, `files_touched`, `tests_run`, `last_updated`, `last_verified_commit`, `selftest_retries`, `checkpoint_writes`.
 
+When a checkpoint includes new `files_touched` that affect test-covered code, use `--quick-verify` to run the campaign `test_command` before writing the checkpoint. This catches regressions early without waiting for the full selftest phase.
+
+If checkpoint reports `scope_drift_warnings`, review the warnings. Either justify the drift by updating `scope_in` via `harness_contract.py`, or revert the out-of-scope changes before continuing.
+
 When the feature has multiple independent sub-tasks (e.g. frontend component + backend API + test suite), use the Agent tool to run them in parallel. Merge results and update the checkpoint after all agents complete. Do not parallelize steps that depend on each other.
 
 Keep `progress.md` short. It is archival, not operational.
@@ -185,12 +191,13 @@ Always run self-test before completion:
 2. Run the active contract's `verification_commands`.
 3. Run the baseline smoke check (see Baseline Verification above).
 4. Update the checkpoint with the exact tests run.
+5. If the active contract has `manual_checks`, each must appear in `checkpoint.manual_checks_completed` before transitioning to done. Use `harness_checkpoint.py --manual-check-done "description"` to record each completed manual check.
 
 If self-test fails:
 
-1. Run `harness_checkpoint.py --selftest-retry` to increment `selftest_retries`.
+1. Run `harness_checkpoint.py --selftest-retry --failure-command "..." --failure-summary "..."` to record the failure context and increment `selftest_retries`.
 2. Diagnose and fix the issue, then re-run.
-3. When `selftest_retries >= 3`, stop retrying — block the feature with `harness_transition.py --to blocked --blocked-reason "..."` and record the failure pattern.
+3. When `selftest_retries >= 3`, stop retrying — block the feature with `harness_transition.py --to blocked --blocked-reason "..." --diagnostic-command "..." --suggested-fix "..."` and record the failure pattern.
 
 Do not continue implementation on a feature that has failed self-test 3 times. The block forces a deliberate re-evaluation in the next session.
 
@@ -221,9 +228,10 @@ Start a fresh session when any of these signals appear (reported by `harness_sum
 - 2+ features completed in the current session
 - checkpoint written 3+ times for the current feature
 - 10+ completed steps accumulated in the checkpoint
+- 15+ session steps (checkpoint writes in the current session)
 - `selftest_retries >= 3` (this also requires blocking the feature)
 
-These are hard signals, not suggestions. When they appear, checkpoint the current state and hand off to a new session.
+These are hard signals, not suggestions. When they appear, run `harness_summary.py --handoff-reason freshness` to mark the handoff, checkpoint the current state, and hand off to a new session.
 
 ## Command Behavior
 

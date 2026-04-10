@@ -182,12 +182,17 @@ def normalize_checkpoint(value: Any) -> Optional[Dict[str, Any]]:
         "last_verified_commit": value.get("last_verified_commit"),
         "selftest_retries": int(value.get("selftest_retries") or 0),
         "checkpoint_writes": int(value.get("checkpoint_writes") or 0),
+        "last_failure": value.get("last_failure"),
+        "scope_drift_warnings": [str(w) for w in ensure_list(value.get("scope_drift_warnings"))],
+        "verification_runs": int(value.get("verification_runs") or 0),
+        "manual_checks_completed": dedupe([str(item) for item in ensure_list(value.get("manual_checks_completed"))]),
     }
 
 
 def normalize_feature(feature: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(feature)
     normalized.setdefault("dependencies", [])
+    normalized.setdefault("complexity", None)
     normalized.setdefault("sessions", [])
     normalized.setdefault("blocked_reason", None)
     normalized.setdefault("blocked_history", [])
@@ -372,7 +377,10 @@ def validate_dependencies(features: List[Dict[str, Any]]) -> List[str]:
     return errors
 
 
-def eligible_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+COMPLEXITY_ORDER = {"small": 0, "medium": 1, "large": 2, None: 1}
+
+
+def eligible_features(features: List[Dict[str, Any]], *, prefer_small: bool = False) -> List[Dict[str, Any]]:
     done = {feature.get("id") for feature in features if feature.get("status") == "done"}
     output = []
     for feature in features:
@@ -381,6 +389,12 @@ def eligible_features(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         deps = set(feature.get("dependencies") or [])
         if deps.issubset(done):
             output.append(feature)
+    if prefer_small:
+        return sorted(output, key=lambda item: (
+            COMPLEXITY_ORDER.get(item.get("complexity"), 1),
+            item.get("priority", 99),
+            item.get("id", ""),
+        ))
     return sorted(output, key=lambda item: (item.get("priority", 99), item.get("id", "")))
 
 
@@ -448,6 +462,18 @@ def check_git_drift(project_root: Path, last_verified_commit: Optional[str]) -> 
     result["drifted"] = True
     result["changed_files"] = infer_git_changed_files(project_root, last_verified_commit)
     return result
+
+
+def run_quick_verify(campaign: Dict[str, Any], project_root: Path, timeout: int = 300) -> Optional[bool]:
+    """Run campaign test_command and return True/False/None (no command)."""
+    cmd = campaign.get("test_command")
+    if not cmd:
+        return None
+    try:
+        result = subprocess.run(cmd, shell=True, cwd=str(project_root), capture_output=True, text=True, timeout=timeout)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def stringify_verification(verification: Any) -> str:
@@ -602,7 +628,11 @@ def build_contract(
     review_policy = review_policy or derive_review_policy(feature, campaign)
     if review_policy not in VALID_REVIEW_POLICIES:
         raise ValueError(f"Invalid review policy: {review_policy}")
-    default_in, default_out = default_scope_lists(mode)
+    complexity = feature.get("complexity")
+    if complexity == "small" and mode == "standard":
+        default_in, default_out = [], []
+    else:
+        default_in, default_out = default_scope_lists(mode)
     contract = {
         "feature_id": feature["id"],
         "goal": f"Deliver {feature['id']} - {feature['name']}",
@@ -618,6 +648,7 @@ def build_contract(
         },
         "created_at": utc_now(),
         "updated_at": utc_now(),
+        "command_history": [],
     }
     if mode != "lite":
         if checklist_items is not None:
@@ -625,6 +656,45 @@ def build_contract(
         elif feature.get("acceptance_checklist") is None:
             feature["acceptance_checklist"] = dedupe(contract["verification_claims"])
     return contract
+
+
+def check_contract_sanity(contract: Dict[str, Any], project_root: Path) -> List[str]:
+    """Check if verification commands reference existing files and paths."""
+    warnings: List[str] = []
+    cwd = Path(contract.get("execution_context", {}).get("cwd", str(project_root)))
+    if not cwd.is_dir():
+        warnings.append(f"execution_context.cwd does not exist: {cwd}")
+    for cmd in contract.get("verification_commands", []):
+        parts = cmd.split()
+        for part in parts:
+            if "/" in part and not part.startswith("-") and not any(c in part for c in "*?["):
+                target = cwd / part
+                if not target.exists():
+                    warnings.append(f"Command references non-existent path: {part} (from: {cmd})")
+    return warnings
+
+
+def detect_scope_drift(contract: Dict[str, Any], files_touched: List[str]) -> List[str]:
+    """Heuristic check: do files_touched appear to violate scope_out declarations?"""
+    scope_out = contract.get("scope_out") or []
+    if not scope_out:
+        return []
+    # Pre-compile: extract path-like tokens from scope_out once
+    scope_tokens: List[tuple] = []  # (token, original_item)
+    for item in scope_out:
+        for token in re.findall(r"[\w./-]+", item.lower()):
+            if "/" in token:
+                scope_tokens.append((token, item))
+    if not scope_tokens:
+        return []
+    warnings: List[str] = []
+    for filepath in files_touched:
+        fp_lower = filepath.lower()
+        for token, item in scope_tokens:
+            if token in fp_lower:
+                warnings.append(f"File {filepath} may violate scope_out: '{item}'")
+                break
+    return dedupe(warnings)
 
 
 def next_resume_steps(
@@ -669,10 +739,19 @@ def summarize_known_failures(features: List[Dict[str, Any]], campaign: Dict[str,
     if campaign.get("baseline_status") == "failing":
         failures.append("Baseline verification is failing.")
     for feature in features:
-        if feature.get("status") == "blocked":
+        status = feature.get("status")
+        if status == "blocked":
             reason = str(feature.get("blocked_reason") or "").strip()
-            if reason:
-                failures.append(f"{feature['id']}: {reason}")
+            suggested_fix = ""
+            history = feature.get("blocked_history") or []
+            if history:
+                diag = history[-1].get("diagnostic") or {}
+                suggested_fix = diag.get("suggested_fix") or ""
+            line = f"{feature['id']}: {reason}" if reason else ""
+            if suggested_fix:
+                line += f" (suggested: {suggested_fix})"
+            if line.strip(": "):
+                failures.append(line)
     return dedupe(failures)
 
 
@@ -685,6 +764,7 @@ def build_session_summary(
     environment_status: Optional[str] = None,
     resume_steps: Optional[List[str]] = None,
     known_failures: Optional[List[str]] = None,
+    handoff_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     summary = dict(existing_summary or {})
     counts = count_statuses(features)
@@ -698,17 +778,26 @@ def build_session_summary(
     summary["environment_status"] = environment_status or campaign.get("baseline_status", "unknown")
     summary["last_session_date"] = campaign.get("last_session_date", "")
     summary["last_session_commit"] = campaign.get("last_session_commit")
-    # Fold open_issues from the current feature's checkpoint into the summary
+    # Look up current feature once for open_issues, last_failure, and freshness
     current_id = campaign.get("current_feature")
-    open_issues: List[str] = []
+    current_feature = None
     if current_id:
         try:
-            feature = get_feature(features, current_id)
-            checkpoint = feature.get("checkpoint") or {}
-            open_issues = [str(i) for i in (checkpoint.get("open_issues") or [])]
+            current_feature = get_feature(features, current_id)
         except ValueError:
             pass
-    summary["open_issues"] = dedupe(open_issues)
+    checkpoint = (current_feature.get("checkpoint") or {}) if current_feature else {}
+    summary["open_issues"] = dedupe([str(i) for i in (checkpoint.get("open_issues") or [])])
+    summary["last_selftest_failure"] = checkpoint.get("last_failure")
+    # Session step counter — reset when session_id changes
+    current_session_id = campaign.get("session_count", 0)
+    prev_session_id = (existing_summary or {}).get("session_id")
+    if prev_session_id == current_session_id:
+        session_step_count = (existing_summary or {}).get("session_step_count", 0)
+    else:
+        session_step_count = 0
+    summary["session_id"] = current_session_id
+    summary["session_step_count"] = session_step_count
     # Session freshness indicators
     freshness_warnings: List[str] = []
     done_count = counts.get("done", 0)
@@ -716,22 +805,24 @@ def build_session_summary(
     session_done = done_count - prev_done
     if session_done >= 2:
         freshness_warnings.append(f"{session_done} features completed this session — consider a fresh session.")
-    if current_id:
-        try:
-            feature = get_feature(features, current_id)
-            cp = feature.get("checkpoint") or {}
-            writes = cp.get("checkpoint_writes", 0)
-            steps = len(cp.get("completed_steps") or [])
-            retries = cp.get("selftest_retries", 0)
-            if writes >= 3:
-                freshness_warnings.append(f"checkpoint written {writes} times — context may be heavy.")
-            if steps >= 10:
-                freshness_warnings.append(f"{steps} completed steps — consider a fresh session.")
-            if retries >= 3:
-                freshness_warnings.append(f"selftest failed {retries} times — block this feature.")
-        except ValueError:
-            pass
+    if checkpoint:
+        writes = checkpoint.get("checkpoint_writes", 0)
+        steps = len(checkpoint.get("completed_steps") or [])
+        retries = checkpoint.get("selftest_retries", 0)
+        if writes >= 3:
+            freshness_warnings.append(f"checkpoint written {writes} times — context may be heavy.")
+        if steps >= 10:
+            freshness_warnings.append(f"{steps} completed steps — consider a fresh session.")
+        if retries >= 3:
+            freshness_warnings.append(f"selftest failed {retries} times — block this feature.")
+    if summary.get("session_step_count", 0) >= 15:
+        freshness_warnings.append(f"{summary['session_step_count']} steps this session — consider a fresh session.")
     summary["freshness_warnings"] = freshness_warnings
+    # Handoff reason — only set explicitly by caller, never auto-inferred
+    if handoff_reason:
+        summary["handoff_reason"] = handoff_reason
+    else:
+        summary.setdefault("handoff_reason", None)
     return summary
 
 
@@ -747,6 +838,9 @@ def validate_feature(feature: Dict[str, Any]) -> List[str]:
         errors.append(f"Feature {feature_id}: invalid status {status!r}")
     if not isinstance(feature.get("priority"), int) or not (1 <= feature["priority"] <= 5):
         errors.append(f"Feature {feature_id}: priority must be an integer between 1 and 5")
+    complexity = feature.get("complexity")
+    if complexity is not None and complexity not in ("small", "medium", "large"):
+        errors.append(f"Feature {feature_id}: complexity must be 'small', 'medium', 'large', or null")
     verification = feature.get("verification")
     if not isinstance(verification, (str, dict)):
         errors.append(f"Feature {feature_id}: verification must be a string or object")
@@ -779,6 +873,20 @@ def validate_feature(feature: Dict[str, Any]) -> List[str]:
                 errors.append(f"Feature {feature_id}: checkpoint.selftest_retries must be an integer")
             if not isinstance(checkpoint.get("checkpoint_writes", 0), int):
                 errors.append(f"Feature {feature_id}: checkpoint.checkpoint_writes must be an integer")
+            last_failure = checkpoint.get("last_failure")
+            if last_failure is not None:
+                if not isinstance(last_failure, dict):
+                    errors.append(f"Feature {feature_id}: checkpoint.last_failure must be an object or null")
+                else:
+                    for lf_field in ("command", "error_summary"):
+                        if last_failure.get(lf_field) is not None and not isinstance(last_failure.get(lf_field), str):
+                            errors.append(f"Feature {feature_id}: checkpoint.last_failure.{lf_field} must be a string")
+                    if last_failure.get("affected_files") is not None and not isinstance(last_failure.get("affected_files"), list):
+                        errors.append(f"Feature {feature_id}: checkpoint.last_failure.affected_files must be an array")
+            if not isinstance(checkpoint.get("verification_runs", 0), int):
+                errors.append(f"Feature {feature_id}: checkpoint.verification_runs must be an integer")
+            if not isinstance(checkpoint.get("manual_checks_completed", []), list):
+                errors.append(f"Feature {feature_id}: checkpoint.manual_checks_completed must be an array")
         if status != "in_progress":
             errors.append(f"Feature {feature_id}: only in_progress features may carry a checkpoint")
     return errors
@@ -842,6 +950,12 @@ def validate_session_summary(summary: Dict[str, Any], feature_ids: Iterable[str]
         errors.append("session-summary.open_issues must be an array")
     if not isinstance(summary.get("environment_status"), str):
         errors.append("session-summary.environment_status must be a string")
+    if summary.get("session_step_count") is not None and not isinstance(summary.get("session_step_count"), int):
+        errors.append("session-summary.session_step_count must be an integer")
+    valid_handoff = {"freshness", "blocked", "completed", "interrupted"}
+    hr = summary.get("handoff_reason")
+    if hr is not None and hr not in valid_handoff:
+        errors.append(f"session-summary.handoff_reason must be one of {sorted(valid_handoff)} or null")
     return errors
 
 
