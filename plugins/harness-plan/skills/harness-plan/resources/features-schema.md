@@ -43,7 +43,7 @@ Use this schema when creating `.harness/features-schema.json`.
           },
           "status": {
             "type": "string",
-            "enum": ["pending", "in_progress", "done", "blocked", "skipped"]
+            "enum": ["backlog", "pending", "in_progress", "done", "blocked", "skipped"]
           },
           "priority": {
             "type": "integer",

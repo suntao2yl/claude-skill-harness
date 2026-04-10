@@ -153,7 +153,7 @@ When no feature is in progress:
 4. In `standard` and `heavy` mode, add scope boundaries and checklist items only if the auto-generated contract is still too vague.
 5. Start implementation immediately using task tracking. Do not ask "should I start?" — the PICK decision is the go-ahead.
 
-Allowed status transitions: `pending→in_progress`, `pending→skipped`, `in_progress→done`, `in_progress→blocked`, `blocked→pending`. The scripts enforce these; read `resources/state-machine.md` only if you need the full rules.
+Allowed status transitions: `backlog→pending`, `backlog→in_progress`, `backlog→skipped`, `pending→in_progress`, `pending→skipped`, `in_progress→done`, `in_progress→blocked`, `blocked→pending`. The scripts enforce these; read `resources/state-machine.md` only if you need the full rules.
 
 ## CONTINUE
 

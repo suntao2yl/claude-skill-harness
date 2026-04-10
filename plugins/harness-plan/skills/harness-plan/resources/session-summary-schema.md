@@ -35,10 +35,11 @@ Use this schema when creating `.harness/session-summary.json`.
     },
     "progress_counts": {
       "type": "object",
-      "required": ["total", "completed", "pending", "in_progress", "done", "blocked", "skipped"],
+      "required": ["total", "completed", "backlog", "pending", "in_progress", "done", "blocked", "skipped"],
       "properties": {
         "total": { "type": "integer" },
         "completed": { "type": "integer" },
+        "backlog": { "type": "integer" },
         "pending": { "type": "integer" },
         "in_progress": { "type": "integer" },
         "done": { "type": "integer" },

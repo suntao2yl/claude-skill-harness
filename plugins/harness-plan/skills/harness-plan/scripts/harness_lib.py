@@ -13,10 +13,11 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 VALID_MODES = {"lite", "standard", "heavy"}
-VALID_STATUSES = {"pending", "in_progress", "done", "blocked", "skipped"}
+VALID_STATUSES = {"backlog", "pending", "in_progress", "done", "blocked", "skipped"}
 VALID_REVIEW_POLICIES = {"selftest", "qa"}
 ENVIRONMENT_STATUSES = {"unknown", "passing", "failing", "bootstrapped"}
 TRANSITIONS = {
+    "backlog": {"pending", "in_progress", "skipped"},
     "pending": {"in_progress", "skipped"},
     "in_progress": {"done", "blocked"},
     "blocked": {"pending"},
@@ -221,6 +222,16 @@ def normalize_campaign(campaign: Dict[str, Any], features: List[Dict[str, Any]],
 def load_state(project_root: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     campaign_path = harness_file(project_root, "campaign.json")
     features_path = harness_file(project_root, "features.json")
+    if not campaign_path.exists():
+        raise SystemExit(
+            f"campaign.json not found at {campaign_path}\n"
+            "Run /harness-plan to initialize the campaign first."
+        )
+    if not features_path.exists():
+        raise SystemExit(
+            f"features.json not found at {features_path}\n"
+            "Run /harness-plan to initialize features first."
+        )
     campaign = load_json(campaign_path, required=True)
     features_payload = load_json(features_path, required=True)
     if not isinstance(campaign, dict):

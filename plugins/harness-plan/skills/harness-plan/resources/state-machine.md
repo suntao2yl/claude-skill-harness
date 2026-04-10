@@ -17,6 +17,9 @@ Harness v2 keeps the command surface stable while making feature transitions det
 Allowed transitions:
 
 ```text
+backlog -> pending
+backlog -> in_progress
+backlog -> skipped
 pending -> in_progress
 pending -> skipped
 in_progress -> done
