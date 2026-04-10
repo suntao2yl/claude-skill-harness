@@ -50,11 +50,7 @@ def main() -> int:
     if target_status not in TRANSITIONS.get(current_status, set()):
         raise SystemExit(f"Invalid transition: {current_status} -> {target_status}")
     active_feature_id = campaign.get("current_feature")
-    if current_status == "blocked" and target_status != "pending":
-        raise SystemExit("Blocked features may only transition back to pending.")
     if target_status == "in_progress":
-        if current_status not in ("backlog", "pending"):
-            raise SystemExit(f"Only backlog/pending features may transition to in_progress, not {current_status}.")
         if active_feature_id and active_feature_id != feature_id:
             raise SystemExit(
                 f"Cannot start {feature_id} because {active_feature_id} is already in progress. "

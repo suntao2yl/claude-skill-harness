@@ -81,14 +81,17 @@ def ensure_harness_dir(project_root: Path) -> Path:
     return path
 
 
-def load_json(path: Path, required: bool = True) -> Optional[Any]:
-    if not path.exists():
-        if required:
-            raise FileNotFoundError(f"Missing required file: {path}")
-        return None
+def load_json(path: Path, required: bool = True, hint: Optional[str] = None) -> Optional[Any]:
     try:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+    except FileNotFoundError:
+        if required:
+            msg = f"Missing required file: {path}"
+            if hint:
+                msg += f"\n{hint}"
+            raise SystemExit(msg)
+        return None
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
 
@@ -222,18 +225,8 @@ def normalize_campaign(campaign: Dict[str, Any], features: List[Dict[str, Any]],
 def load_state(project_root: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     campaign_path = harness_file(project_root, "campaign.json")
     features_path = harness_file(project_root, "features.json")
-    if not campaign_path.exists():
-        raise SystemExit(
-            f"campaign.json not found at {campaign_path}\n"
-            "Run /harness-plan to initialize the campaign first."
-        )
-    if not features_path.exists():
-        raise SystemExit(
-            f"features.json not found at {features_path}\n"
-            "Run /harness-plan to initialize features first."
-        )
-    campaign = load_json(campaign_path, required=True)
-    features_payload = load_json(features_path, required=True)
+    campaign = load_json(campaign_path, required=True, hint="Run /harness-plan to initialize the campaign first.")
+    features_payload = load_json(features_path, required=True, hint="Run /harness-plan to initialize features first.")
     if not isinstance(campaign, dict):
         raise ValueError("campaign.json must contain an object")
     if not isinstance(features_payload, dict) or "features" not in features_payload:
