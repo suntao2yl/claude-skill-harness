@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,26 @@ TRANSITIONS = {
     "in_progress": {"done", "blocked"},
     "blocked": {"pending"},
 }
+
+
+# ── Platform detection (v0.4.0) ──────────────────────────────
+
+def detect_platform() -> str:
+    """Return 'codex' or 'claude' based on environment signals."""
+    if os.environ.get("CODEX_SKILL_DIR"):
+        return "codex"
+    if os.environ.get("CLAUDE_SKILL_DIR"):
+        return "claude"
+    if ".codex" in Path(__file__).resolve().parts:
+        return "codex"
+    return "claude"
+
+
+def skill_home() -> Path:
+    """Return the platform's skill installation directory."""
+    if detect_platform() == "codex":
+        return Path.home() / ".codex" / "skills"
+    return Path.home() / ".claude" / "skills"
 
 
 def utc_now() -> str:
