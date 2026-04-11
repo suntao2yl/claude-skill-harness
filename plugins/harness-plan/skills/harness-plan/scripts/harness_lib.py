@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -25,8 +26,9 @@ TRANSITIONS = {
 }
 
 
-# ── Platform detection (v0.4.0) ──────────────────────────────
+# ── Platform detection ────────────────────────────────────────
 
+@lru_cache(maxsize=1)
 def detect_platform() -> str:
     """Return 'codex' or 'claude' based on environment signals."""
     if os.environ.get("CODEX_SKILL_DIR"):
