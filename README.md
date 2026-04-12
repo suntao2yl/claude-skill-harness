@@ -158,11 +158,25 @@ The plugin automatically registers a SessionStart hook on install. Each new sess
 
 ## Install
 
+### Claude Code
+
 ```bash
-# As a plugin (recommended)
+# Add the marketplace, then install the plugin
 /plugin marketplace add suntao2yl/claude-skill-harness
 /plugin install harness-plan@suntao-skills
 ```
+
+After installation, invoke the skill with `/harness-plan`.
+
+### Codex
+
+```bash
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo suntao2yl/claude-skill-harness \
+  --path plugins/harness-plan/skills/harness-plan
+```
+
+Restart Codex after installation so the new skill appears in the skill list.
 
 ## License
 

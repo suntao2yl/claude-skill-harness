@@ -158,11 +158,25 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 
 ## 安装
 
+### Claude Code
+
 ```bash
-# 作为 plugin 安装(推荐)
+# 先添加 marketplace，再安装 plugin
 /plugin marketplace add suntao2yl/claude-skill-harness
 /plugin install harness-plan@suntao-skills
 ```
+
+安装完成后，直接通过 `/harness-plan` 调用这个 skill。
+
+### Codex
+
+```bash
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo suntao2yl/claude-skill-harness \
+  --path plugins/harness-plan/skills/harness-plan
+```
+
+安装完成后请重启 Codex，新 skill 才会出现在技能列表中。
 
 ## License
 
