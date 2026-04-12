@@ -27,6 +27,14 @@
 - 会话新鲜度信号：`checkpoint_writes`、已完成步骤数、会话内完成 feature 数触发换会话建议
 - 并行子任务指导：在单个 feature 内使用 Agent tool 并行处理独立子任务
 - 默认自动推进：仅 INIT 计划审批、破坏性操作和 QA 审查需要人工确认
+- scope drift 检测：checkpoint 时检查 `files_touched` 是否越过 `scope_out` 边界
+- quick-verify：`harness_checkpoint.py --quick-verify` 在实现阶段提前跑 `test_command`，尽早发现回归
+- 结构化失败记录：checkpoint 中新增 `last_failure` 对象（command, error_summary, affected_files, timestamp）
+- 会话交接上下文：session-summary 新增 `session_id`、`session_step_count`、`handoff_reason`，支持跨会话连续性
+- 手动检查追踪：`--manual-check-done` 记录已完成的手动检查项
+- 契约命令历史：`command_history` 记录验证命令的变更轨迹（含时间戳）
+- 状态机新增 `backlog` 状态，支持转换到 `pending`、`in_progress`、`skipped`
+- 运行时平台检测：`detect_platform()` / `skill_home()` 支持 Codex 环境兼容
 
 ## 关键文件
 
@@ -72,6 +80,7 @@
 - `manual_checks`
 - `review_policy`
 - `execution_context` — 验证命令的工作目录和超时设置
+- `command_history` — 验证命令变更的时间戳记录
 
 ### `session-summary.json`
 
@@ -83,6 +92,8 @@
 - 下一步动作
 - 已知失败项
 - 环境状态
+- `session_id` 和 `session_step_count` 用于会话边界检测
+- `handoff_reason` — 上一会话结束原因（freshness, blocked, completed, interrupted）
 
 ## 内置脚本
 
@@ -93,6 +104,9 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --quick-verify
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --manual-check-done "检查描述"
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007 --update-command "旧命令" "新命令"
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py --label "phase-1"
 ```
 
@@ -101,8 +115,9 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py --label "phase-1"
 
 脚本关键行为：
 - `harness_validate.py` 检测 git drift（HEAD 与上次验证提交的差异）以及循环依赖和悬空依赖。
-- `harness_checkpoint.py` 在未显式提供时自动从 `git diff` 提取 `files_touched`。
-- `harness_transition.py` 在 feature 完成时将契约归档到 feature 记录中（而非删除），阻塞时追加带时间戳的条目到 `blocked_history`。
+- `harness_checkpoint.py` 在未显式提供时自动从 `git diff` 提取 `files_touched`。`--quick-verify` 在写入前跑测试。`--selftest-retry` / `--failure-command` / `--failure-summary` 记录结构化失败信息。`--manual-check-done` 标记手动检查完成。
+- `harness_contract.py` 支持 `--update-command` 更新验证命令并记录变更历史。
+- `harness_transition.py` 在 feature 完成时将契约归档到 feature 记录中（而非删除），阻塞时追加带时间戳的条目到 `blocked_history`。支持 `backlog` 状态。
 - `harness_reset.py` 将整个 campaign 归档到 `.harness/archive/<timestamp>_<label>/`，清理 `.harness/` 以便重新 INIT。
 
 ## 工作流
@@ -138,6 +153,8 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 - 一行 next step
 - 已知失败项（最多 5 条）
 - 当前 feature 上次 checkpoint 的 open issues（最多 5 条）
+- 上一会话的 `handoff_reason`（freshness, blocked, completed, interrupted）
+- 上次自测失败详情（如有）
 
 ## 安装
 

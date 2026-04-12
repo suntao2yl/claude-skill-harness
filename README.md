@@ -27,6 +27,14 @@ Harness v2 keeps the `/harness-plan` command surface the same, but swaps the int
 - session freshness signals: `checkpoint_writes`, completed step count, and session feature count trigger new-session recommendations
 - parallel sub-task guidance: use Agent tool for independent work within a single feature
 - auto-advance by default: only INIT plan approval, destructive actions, and QA review pause for confirmation
+- scope drift detection: checkpoint warns when `files_touched` violate `scope_out` boundaries
+- quick-verify: `harness_checkpoint.py --quick-verify` runs `test_command` during implementation to catch regressions early
+- structured failure recording: `last_failure` object in checkpoint (command, error_summary, affected_files, timestamp)
+- session handoff context: `session_id`, `session_step_count`, and `handoff_reason` in session-summary for cross-session continuity
+- manual check tracking: `--manual-check-done` records completed manual checks before feature completion
+- contract command history: `command_history` tracks verification command refinements with timestamps
+- `backlog` status added to state machine with transitions to `pending`, `in_progress`, and `skipped`
+- runtime platform detection: `detect_platform()` / `skill_home()` for Codex environment compatibility
 
 ## Core files
 
@@ -72,6 +80,7 @@ The active feature contract:
 - `manual_checks`
 - `review_policy`
 - `execution_context` — working directory and timeout for verification commands
+- `command_history` — timestamped log of verification command refinements
 
 ### `session-summary.json`
 
@@ -83,6 +92,8 @@ Compact resume artifact used by new sessions and the SessionStart hook:
 - next resume steps
 - known failures
 - environment status
+- `session_id` and `session_step_count` for session boundary detection
+- `handoff_reason` — why the previous session ended (freshness, blocked, completed, interrupted)
 
 ## Built-in scripts
 
@@ -93,6 +104,9 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --quick-verify
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --manual-check-done "check description"
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007 --update-command "old cmd" "new cmd"
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py --label "phase-1"
 ```
 
@@ -101,8 +115,9 @@ These scripts only operate on `.harness/` and are meant to replace hand-edited J
 
 Key script behaviors:
 - `harness_validate.py` checks for git drift (HEAD vs last verified commit) and detects circular or dangling feature dependencies.
-- `harness_checkpoint.py` auto-extracts `files_touched` from `git diff` when not explicitly provided.
-- `harness_transition.py` archives the active contract into the feature record on completion (instead of deleting it) and appends timestamped entries to `blocked_history` when blocking.
+- `harness_checkpoint.py` auto-extracts `files_touched` from `git diff` when not explicitly provided. `--quick-verify` runs `test_command` before writing. `--selftest-retry` / `--failure-command` / `--failure-summary` record structured failure info. `--manual-check-done` marks manual checks as completed.
+- `harness_contract.py` supports `--update-command` to refine verification commands with history tracking.
+- `harness_transition.py` archives the active contract into the feature record on completion (instead of deleting it) and appends timestamped entries to `blocked_history` when blocking. Supports `backlog` status.
 - `harness_reset.py` archives the entire campaign into `.harness/archive/<timestamp>_<label>/` and cleans `.harness/` for a fresh INIT.
 
 ## Workflow
@@ -138,6 +153,8 @@ The plugin automatically registers a SessionStart hook on install. Each new sess
 - one next-step line
 - known failures (up to 5)
 - open issues from the current feature's last checkpoint (up to 5)
+- `handoff_reason` from previous session (freshness, blocked, completed, interrupted)
+- last selftest failure details when available
 
 ## Install
 
