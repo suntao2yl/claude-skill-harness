@@ -1,6 +1,7 @@
 ---
 name: harness-plan
-description: "Long-running task harness for multi-session campaigns. Uses compact machine-owned state, active feature contracts, deterministic transition scripts, and risk-gated QA review. Triggers: /harness-plan, campaign, long task, multi-session, feature tracking"
+description: "Long-running task harness for multi-session campaigns. Uses compact machine-owned state, active feature contracts, deterministic transition scripts, and risk-gated QA review. Use when user says 'start a campaign', 'continue the campaign', 'track features', 'long-running task', or invokes /harness-plan."
+compatibility: "Requires Python 3.8+. Works in Claude Code CLI and Claude.ai."
 allowed-tools:
   - Read
   - Write
@@ -15,6 +16,9 @@ allowed-tools:
   - TaskList
   - TaskGet
   - AskUserQuestion
+metadata:
+  author: suntao2yl
+  version: 0.1.0
 ---
 
 # Harness v2
@@ -267,3 +271,68 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --ne
 ```
 
 If a script reports invalid state, repair the state before continuing implementation.
+
+## Gotchas
+- Every feature's `verification.command` MUST be a real, executable command. Placeholder commands like `echo "TODO"` or `true` will pass selftest but fail engineering-level advance validation.
+- When `selftest_retries >= 3`, stop. Do not keep retrying — block the feature with `harness_transition.py --to blocked`. The block forces deliberate re-evaluation next session.
+- `checkpoint.next_step` must be a concrete, actionable instruction (e.g., "implement the --output flag parser in cli.py"), not vague ("continue working on the feature").
+- Do not reconstruct campaign state from `progress.md`. Trust the machine-owned files (`session-summary.json`, `current-contract.json`, `features.json`) in the priority order listed under Resume Artifact Priority.
+- `verification` in `features.json` is immutable. If the verification approach needs to change, update `verification_commands` in `current-contract.json` via `harness_contract.py --update-command` — never edit `features.json` verification directly.
+- Do not silently switch the active feature. If a different feature is `in_progress`, the transition script will reject the switch. Ask the user whether to block or complete the current feature first.
+
+## Troubleshooting
+
+**harness_validate.py reports invalid state**
+1. Read the error output — it names the specific inconsistency (e.g., "current_feature F003 is not in_progress in features.json").
+2. Common causes: a previous session crashed mid-transition, or a manual edit broke consistency.
+3. Fix: use the transition script to correct the feature status, then re-run validate.
+
+**selftest fails repeatedly on the same error**
+1. Check `checkpoint.selftest_retries` — if already at 2, the next failure will require blocking.
+2. Read the last failure context: `checkpoint.last_selftest_failure.error_summary`.
+3. If the failure is environmental (missing dependency, wrong Python version), fix the environment first via `campaign.bootstrap_command`.
+4. If the failure is a real bug, fix the code, then re-run selftest.
+
+**contract and features.json are inconsistent**
+1. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_validate.py` to see the exact mismatch.
+2. Refresh the contract: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id <id>`.
+3. If the feature was modified outside the scripts, the contract may reference stale verification commands — use `--update-command` to fix.
+
+**session-summary.json is missing or stale**
+1. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py` to regenerate it.
+2. If `campaign.json` is also missing, the campaign is corrupted — use `/harness-plan reset` to archive and start fresh.
+
+## Examples
+
+**Example: resume a campaign and complete a feature**
+
+```
+User: /harness-plan
+
+→ Startup Rules:
+  1. Runs harness_validate.py — state is valid
+  2. Reads campaign.json: goal="Add CSV export to the dashboard"
+  3. Reads session-summary.json: current_feature=F002 "CSV download button"
+  4. Reads current-contract.json: next_step="wire the download handler to the export API"
+
+→ CONTINUE phase:
+  - Resumes from checkpoint.next_step
+  - Implements the download handler
+  - Runs harness_checkpoint.py with --quick-verify (campaign test_command passes)
+
+→ Self-Test:
+  - Runs campaign test_command: pytest tests/ — pass
+  - Runs verification_commands: pytest tests/test_csv_export.py -k download — pass
+  - Updates checkpoint with tests_run
+
+→ Completion:
+  - harness_transition.py --feature-id F002 --to done
+  - harness_summary.py — reports 3/5 features done
+  - Appends entry to progress.md
+
+→ PICK next feature:
+  - harness_pick_next.py — selects F003 "CSV column selector"
+  - harness_transition.py --feature-id F003 --to in_progress
+  - harness_contract.py --feature-id F003 — creates new contract
+  - Starts implementation immediately
+```
