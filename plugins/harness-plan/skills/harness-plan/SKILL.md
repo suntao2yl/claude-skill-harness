@@ -17,7 +17,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   author: suntao2yl
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # Harness v2
@@ -49,6 +49,10 @@ Support the existing surface:
 /harness-plan add "feature description"
 /harness-plan skip F003
 /harness-plan reset
+/harness-plan autodrive on
+/harness-plan autodrive off
+/harness-plan autodrive status
+/harness-plan autodrive reset
 ```
 
 **Routing logic:**
@@ -74,6 +78,7 @@ Read these only when needed:
 - `resources/contract-schema.md`
 - `resources/session-summary-schema.md`
 - `resources/reviewer-calibration.md`
+- `resources/autodrive.md`
 
 ## Startup Rules
 
@@ -244,9 +249,62 @@ These are hard signals, not suggestions. When they appear, run `harness_summary.
 - `/harness-plan add`: user supplies the new feature metadata; then update `features.json` and refresh summary
 - `/harness-plan skip F003`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F003 --to skipped`
 - `/harness-plan reset`: `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py` to archive and clean, then start INIT again
+- `/harness-plan autodrive on|off|status|reset`: see Autodrive Mode below; routes to `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --enable|--disable|--status|--reset`
 
 Blocked features must be moved back to `pending` before they can become `in_progress` again.
 `harness_contract.py` and `harness_checkpoint.py` only work for the active `in_progress` feature.
+
+## Autodrive Mode (cross-session auto-advance)
+
+Autodrive lets the campaign progress one feature per session without user input. When `.harness/autodrive.json` exists with `enabled: true`, you are running inside an autodrive chain.
+
+**Enable / disable / inspect:**
+
+- `/harness-plan autodrive on`  → `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --enable` (defaults to `--max-iterations 20`)
+- `/harness-plan autodrive off` → `--disable` (chain stops at next Stop hook)
+- `/harness-plan autodrive status` → `--status`
+- `/harness-plan autodrive reset` → `--reset` (deletes config + fail marker)
+
+When enabling, also record `campaign.last_session_commit` so reviewers can diff. The script captures `campaign_base_commit` at enable time.
+
+**In-session behavior when autodrive is active:**
+
+After a feature transitions to `done` and `harness_summary.py` runs, you must stop in this session — do NOT pick the next feature here. The Stop hook spawns a fresh session:
+
+1. Stage and commit:
+   - `git add -A`
+   - `git commit -m "feat(harness): complete F0XX - <title from features.json>"` (use the feature's `title` field; fall back to `name` then id)
+2. Print one line: `[autodrive] feature F0XX complete; ending session`
+3. End your response. No further tool calls.
+
+If `git commit` reports nothing to commit, skip the commit but still end the session.
+
+**Failure handling (chain abort):**
+
+You must trip the fail marker — do NOT let the next session start — when:
+
+- self-test retries hit 3 and you block the feature
+- you find unexpected/inconsistent state you cannot resolve mechanically
+- a question would normally require AskUserQuestion (the user is not present in autodrive)
+
+Run:
+
+```text
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --fail --reason "<short reason>"
+```
+
+then end the session. The Stop hook will see the marker and stop the chain.
+
+**Hard constraints in autodrive:**
+
+- Never call AskUserQuestion. If a clarifying question is unavoidable, fail the chain.
+- Never run destructive scripts (`harness_reset.py`, archive operations).
+- Never spawn `claude -p` yourself — only the Stop hook does that.
+- Iteration cap is enforced by the script (`max_iterations`, default 20). Don't try to override.
+
+**Final review session (handled by the Stop hook, not by you):**
+
+When all features reach a terminal state (done/skipped), the Stop hook spawns a dedicated review session that runs `/security-review` plus four parallel reviewer subagents (testability / maintainability / performance / design-consistency) and writes `.harness/review-report.md`. That session marks `phase=done` and exits.
 
 ## Mode Rules
 
@@ -267,6 +325,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --status
 ```
 
 If a script reports invalid state, repair the state before continuing implementation.

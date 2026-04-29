@@ -1,7 +1,7 @@
 ---
 description: Long-running task harness for multi-session campaigns.
-argument-hint: '[goal|status|review|focus F007|add "feature description"|skip F003|reset]'
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, EnterPlanMode, TaskCreate, TaskUpdate, TaskList, TaskGet, AskUserQuestion
+argument-hint: '[goal|status|review|focus F007|add "feature description"|skip F003|reset|autodrive on|autodrive off|autodrive status|autodrive reset]'
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet, AskUserQuestion
 ---
 
 Use the `harness-plan` skill now.
@@ -22,5 +22,6 @@ Route `$ARGUMENTS` through the skill's Command Router exactly:
 - `add "feature description"`: add a feature and refresh the summary
 - `skip F003`: mark that feature skipped through the transition script
 - `reset`: archive and clean only through the reset flow
+- `autodrive on|off|status|reset`: manage cross-session auto-advance via `harness_autodrive.py`
 
 Do not answer with generic usage text. Execute the routed workflow in the current repository.
