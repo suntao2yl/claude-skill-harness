@@ -64,6 +64,33 @@ Use this schema when creating `.harness/features-schema.json`.
             },
             "default": []
           },
+          "change_units": {
+            "type": "array",
+            "default": [],
+            "description": "Optional sub-feature breakdown (Phase 4+). Only populated in standard/deep mode for non-trivial features. A feature transitions to done only when all its change_units are 'archived'.",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "state"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^CHG-[0-9]{3,}$"
+                },
+                "title": { "type": "string" },
+                "state": {
+                  "type": "string",
+                  "enum": ["proposed", "speccing", "verifying", "archived"]
+                },
+                "spec_path": { "type": ["string", "null"] },
+                "verification_evidence": { "type": ["string", "null"] },
+                "files_touched": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": []
+                }
+              }
+            }
+          },
           "sessions": {
             "type": "array",
             "items": {

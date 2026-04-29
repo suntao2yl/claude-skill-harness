@@ -17,7 +17,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   author: suntao2yl
-  version: 0.4.0
+  version: 0.5.0
 ---
 
 # Harness v2
@@ -325,10 +325,46 @@ When all features reach a terminal state (done/skipped), the Stop hook spawns a 
 ## Mode Rules
 
 - `lite`: contract contains claims, commands, and manual checks only
-- `standard`: add scope boundaries and acceptance checklist
+- `standard`: add scope boundaries and acceptance checklist; **change_units enabled** (see below)
 - `heavy`: same as standard, plus periodic milestone verification and short mid-campaign summaries
 
 Keep the mode differences small. Do not fork the whole workflow by mode.
+
+## Change Units (standard / heavy modes)
+
+Large features benefit from being subdivided into reviewable change units
+(CHG-NNN). Each change unit has its own propose → spec → verify → archive
+lifecycle. The parent feature transitions to `done` only when all its change
+units are `archived`.
+
+In `standard` and `heavy` modes, when PICK selects a feature whose work is
+likely to span multiple commits or multiple files, break it into change
+units before starting implementation:
+
+1. Propose:
+   `python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . propose --feature-id F003 --title "Add CSV parser" --reason "..."`
+2. Spec it (writes mini-RFC via /change-spec):
+   - Run `/change-spec --change-id CHG-001 --output .harness/changes/CHG-001/spec.md`
+   - Then transition: `harness_change.py to-spec --change-id CHG-001 --spec-path .harness/changes/CHG-001/spec.md`
+3. Verify (after implementation):
+   - Run `/completion-verify --contract <derived-from-spec>` and write the
+     JSON to `.harness/changes/CHG-001/verify.json`
+   - Then transition: `harness_change.py to-verify --change-id CHG-001 --verify-evidence .harness/changes/CHG-001/verify.json`
+4. Archive:
+   `harness_change.py archive --change-id CHG-001 --files-touched src/csv.py tests/test_csv.py`
+
+When all change units are archived, run feature Self-Test as usual; the
+feature can transition to done.
+
+In `lite` mode, change units are not used. Skip directly from PICK to
+implementation to Self-Test.
+
+For trivial features (≤30 LOC, single file, single test), prefer flat-feature
+flow even in standard mode — overhead beats granularity at small sizes.
+
+`harness_change.py status [--feature-id F003]` reports change-unit progress.
+`session-summary.json` includes `current_change_unit` and `change_progress`
+counts when change units exist.
 
 ## Script Canon
 
@@ -342,6 +378,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
 python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --status
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . status [--feature-id F007]
 ```
 
 If a script reports invalid state, repair the state before continuing implementation.

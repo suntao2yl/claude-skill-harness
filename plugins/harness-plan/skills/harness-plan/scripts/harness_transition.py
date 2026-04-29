@@ -59,6 +59,17 @@ def main() -> int:
                 f"Cannot start {feature_id} because {active_feature_id} is already in progress. "
                 "Transition the active feature out of in_progress first."
             )
+    if target_status == "done":
+        # Phase 4: when change_units exist, all must be archived.
+        change_units = feature.get("change_units") or []
+        if change_units:
+            unarchived = [c for c in change_units if c.get("state") != "archived"]
+            if unarchived:
+                ids = [c.get("id", "?") for c in unarchived]
+                raise SystemExit(
+                    f"Cannot transition {feature_id} to done: change_units not all archived. "
+                    f"Pending: {ids}. Use harness_change.py to advance them, or cancel them."
+                )
     if target_status == "blocked" and not args.blocked_reason:
         raise SystemExit("--blocked-reason is required when transitioning to blocked")
     head_commit = infer_git_commit(project_root)

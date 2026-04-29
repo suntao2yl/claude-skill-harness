@@ -912,6 +912,30 @@ def validate_feature(feature: Dict[str, Any]) -> List[str]:
                 errors.append(f"Feature {feature_id}: checkpoint.manual_checks_completed must be an array")
         if status != "in_progress":
             errors.append(f"Feature {feature_id}: only in_progress features may carry a checkpoint")
+
+    # change_units (Phase 4+): optional. If present, must be a list of dicts with
+    # the canonical CHG-NNN id pattern and a valid state. Empty/missing is fine.
+    change_units = feature.get("change_units")
+    if change_units is not None:
+        if not isinstance(change_units, list):
+            errors.append(f"Feature {feature_id}: change_units must be an array")
+        else:
+            valid_states = {"proposed", "speccing", "verifying", "archived"}
+            chg_pattern = re.compile(r"^CHG-\d{3,}$")
+            for i, cu in enumerate(change_units):
+                if not isinstance(cu, dict):
+                    errors.append(f"Feature {feature_id}: change_units[{i}] must be an object")
+                    continue
+                cu_id = cu.get("id")
+                if not isinstance(cu_id, str) or not chg_pattern.match(cu_id):
+                    errors.append(f"Feature {feature_id}: change_units[{i}].id invalid: {cu_id!r}")
+                if not isinstance(cu.get("title"), str) or not cu.get("title"):
+                    errors.append(f"Feature {feature_id}: change_units[{i}].title required")
+                if cu.get("state") not in valid_states:
+                    errors.append(f"Feature {feature_id}: change_units[{i}].state invalid: {cu.get('state')!r}")
+                ft = cu.get("files_touched")
+                if ft is not None and not isinstance(ft, list):
+                    errors.append(f"Feature {feature_id}: change_units[{i}].files_touched must be an array")
     return errors
 
 
