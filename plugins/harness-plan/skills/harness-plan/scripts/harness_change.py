@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
 """Change-unit (CHG-NNN) state machine for harness-plan campaigns.
 
-Phase 4 addition. Each feature in standard/deep mode can be subdivided into
-change units, each with its own propose -> spec -> verify -> archive lifecycle.
-This enables reviewable, finer-grained work tracking inside large features
-without breaking flat-feature compatibility.
+Each feature can be subdivided into change units with their own
+propose -> speccing -> verifying -> archived lifecycle. The parent feature
+transitions to done only when all its change_units are archived.
 
-State machine:
-  proposed --to-spec--> speccing --to-verify--> verifying --archive--> archived
-     |                     |                      |
-     +-cancel->archived  +-cancel->archived    +-reopen->speccing
-
-The feature is `done` only when all its change_units are `archived`.
-
-Files written:
-  .harness/changes/CHG-NNN/proposal.md  (on propose)
-  .harness/changes/CHG-NNN/spec.md      (on to-spec, via /change-spec)
-  .harness/changes/CHG-NNN/verify.json  (on to-verify, via /completion-verify)
-  .harness/changes/CHG-NNN/archive.md   (on archive)
-
-The truth-of-state lives in features.json under the parent feature's
-`change_units[]` array. This script never reads/writes the markdown files
-beyond proposal.md and archive.md (paths in spec.md / verify.json are
-populated by the caller / sibling skills).
+The truth-of-state lives in features.json under each feature's
+`change_units[]`. This script writes proposal.md and archive.md alongside
+each unit; spec.md and verify.json are produced by sibling skills
+(/change-spec and /completion-verify) and only their paths are recorded
+here.
 """
 
 from __future__ import annotations
@@ -31,7 +18,6 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 

@@ -33,15 +33,15 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
+# Reuse harness_lib helpers so timestamp / IO conventions stay consistent.
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+from harness_lib import utc_now  # type: ignore  # noqa: E402
+
 DEFAULT_MAX_ITERATIONS = 20
-LOG_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime(LOG_TS_FMT)
 
 
 def harness_dir(project_root: Path) -> Path:

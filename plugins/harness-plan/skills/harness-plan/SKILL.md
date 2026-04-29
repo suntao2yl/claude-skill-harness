@@ -17,7 +17,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   author: suntao2yl
-  version: 0.5.0
+  version: 0.5.1
 ---
 
 # Harness v2
