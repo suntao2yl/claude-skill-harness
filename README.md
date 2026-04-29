@@ -179,6 +179,20 @@ Safety:
 
 Full protocol: `resources/autodrive.md`.
 
+### Recommended companion skills (autodrive)
+
+When running unattended, install these from
+[`harness-discipline`](https://github.com/suntao2yl/claude-skill-discipline):
+
+- **`caveman`** — ultra-compressed output mode. Cuts token usage ~75% with
+  no loss of technical substance. Logs stay readable on review.
+- **`git-guardrails`** — PreToolUse hook that blocks `git push`,
+  `reset --hard`, `clean -fd`, `branch -D`, `checkout .`, `restore .`
+  before they execute. The last line of defense against irreversible
+  operations when no human approves tool calls.
+
+Both install once and apply to every autodrive session.
+
 ## Change units (CHG-NNN)
 
 Standard / heavy mode features can be subdivided into reviewable change

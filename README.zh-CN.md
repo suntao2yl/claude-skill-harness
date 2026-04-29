@@ -179,6 +179,20 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 
 完整协议见 `resources/autodrive.md`。
 
+### autodrive 推荐搭配
+
+无人值守跑 campaign 时,从
+[`harness-discipline`](https://github.com/suntao2yl/claude-skill-discipline)
+额外装两个:
+
+- **`caveman`** —— 超压缩输出模式,token 用量降 ~75%,技术内容无损,
+  日志事后审阅仍可读。
+- **`git-guardrails`** —— PreToolUse hook,在 Claude 执行前拦截
+  `git push` / `reset --hard` / `clean -fd` / `branch -D` /
+  `checkout .` / `restore .`。无人审 tool call 时的最后一道防线。
+
+两者各装一次,所有 autodrive session 自动生效。
+
 ## Change units(CHG-NNN)
 
 standard / heavy 模式下,大 feature 可以拆成多个 reviewable 的 change
