@@ -10,7 +10,6 @@ allowed-tools:
   - Glob
   - Grep
   - Agent
-  - EnterPlanMode
   - TaskCreate
   - TaskUpdate
   - TaskList
