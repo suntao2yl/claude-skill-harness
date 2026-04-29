@@ -156,6 +156,67 @@ The plugin automatically registers a SessionStart hook on install. Each new sess
 - `handoff_reason` from previous session (freshness, blocked, completed, interrupted)
 - last selftest failure details when available
 
+## Cross-session autodrive
+
+`/harness-plan autodrive on` chains one-feature-per-session runs without
+operator input until the campaign completes (or hits the iteration cap).
+The Stop hook spawns a fresh `claude -p` session after each feature; the
+final session runs `/security-review` plus four parallel reviewers and
+writes `.harness/review-report.md`.
+
+```bash
+/harness-plan autodrive on        # default max_iterations=20
+/harness-plan autodrive status
+/harness-plan autodrive off       # next Stop tick exits the chain
+/harness-plan autodrive reset     # delete config + fail marker
+```
+
+Safety:
+- Default-disabled. `--max-iterations N` caps total spawned sessions.
+- `.harness/autodrive.fail` aborts the chain on any unrecoverable state.
+- AskUserQuestion is forbidden in autodrive — clarification needs trip
+  the fail marker via `harness_autodrive.py --fail --reason "..."`.
+
+Full protocol: `resources/autodrive.md`.
+
+## Change units (CHG-NNN)
+
+Standard / heavy mode features can be subdivided into reviewable change
+units, each with a `proposed → speccing → verifying → archived`
+lifecycle. The parent feature transitions to `done` only when all units
+are archived.
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
+    propose --feature-id F003 --title "Add CSV parser"
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
+    to-spec --change-id CHG-001 --spec-path .harness/changes/CHG-001/spec.md
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
+    to-verify --change-id CHG-001 --verify-evidence .harness/changes/CHG-001/verify.json
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
+    archive --change-id CHG-001 --files-touched src/csv.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
+    status [--feature-id F003]
+```
+
+Lite mode keeps the flat-feature flow — change units are opt-in only
+where they add value.
+
+## Discipline skills integration
+
+When [`harness-discipline`](https://github.com/suntao2yl/harness-discipline)
+is installed, harness-plan delegates three operations to it:
+
+| Operation | Skill | When |
+|---|---|---|
+| Test-first plan + verification command | `/tdd-plan` | INIT, per feature |
+| Run verification commands, return JSON verdict | `/completion-verify` | Self-Test |
+| Mini-RFC for a change unit | `/change-spec` | After `propose`, before implementation |
+
+Without discipline installed, harness-plan falls back to inline
+verification (same verdicts, less structured evidence). Discipline is
+recommended but not required.
+
 ## Install
 
 ### Claude Code
