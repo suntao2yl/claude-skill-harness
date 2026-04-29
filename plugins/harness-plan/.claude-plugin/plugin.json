@@ -1,7 +1,7 @@
 {
   "name": "harness-plan",
   "description": "Long-running task harness for multi-session development campaigns. Compact state, active feature contracts, deterministic transition scripts, risk-gated QA review.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "suntao2yl"
   },

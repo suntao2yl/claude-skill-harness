@@ -17,7 +17,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   author: suntao2yl
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # Harness v2
@@ -337,6 +337,14 @@ If a script reports invalid state, repair the state before continuing implementa
 - Do not reconstruct campaign state from `progress.md`. Trust the machine-owned files (`session-summary.json`, `current-contract.json`, `features.json`) in the priority order listed under Resume Artifact Priority.
 - `verification` in `features.json` is immutable. If the verification approach needs to change, update `verification_commands` in `current-contract.json` via `harness_contract.py --update-command` — never edit `features.json` verification directly.
 - Do not silently switch the active feature. If a different feature is `in_progress`, the transition script will reject the switch. Ask the user whether to block or complete the current feature first.
+
+## Anti-patterns
+
+Meta-rules about how to operate this skill, distinct from the per-feature gotchas above. Read once; apply throughout.
+
+- **Don't eager-load all `resources/*.md` at session start.** Each phase has a precise resource list under "Runtime Files" — load only what the current phase needs. Reading every resource on PICK or CONTINUE blows context for no benefit.
+- **Don't call `AskUserQuestion` in autodrive mode.** When `.harness/autodrive.json.enabled == true`, no human is present. Any clarifying question must instead trip the fail marker via `harness_autodrive.py --fail --reason "..."`. See `resources/autodrive.md`.
+- **Don't double up review.** When a campaign runs under `harness-engineering`, the test phase already runs `/security-review` plus multi-persona reviewers. In that context, set `review_policy: selftest` (not `qa`) on harness-plan contracts to avoid running the same review twice. Capability boundaries are defined in `harness-engineering/docs/dedup-matrix.md`.
 
 ## Troubleshooting
 
