@@ -166,7 +166,7 @@ The plugin automatically registers a SessionStart hook on install. Each new sess
 /plugin install harness-plan@suntao-skills
 ```
 
-After installation, invoke the skill with `/harness-plan`.
+After installation, Claude Code exposes the slash command `/harness-plan`; the command routes into the bundled `harness-plan` skill.
 
 ### Codex
 

@@ -166,7 +166,7 @@ INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -
 /plugin install harness-plan@suntao-skills
 ```
 
-安装完成后，直接通过 `/harness-plan` 调用这个 skill。
+安装完成后，Claude Code 会暴露真正的 slash command：`/harness-plan`；该命令会路由到插件内置的 `harness-plan` skill。
 
 ### Codex
 
