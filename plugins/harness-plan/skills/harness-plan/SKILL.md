@@ -17,7 +17,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   author: suntao2yl
-  version: 0.3.0
+  version: 0.4.0
 ---
 
 # Harness v2
@@ -131,7 +131,7 @@ Update `campaign.baseline_status` and refresh `session-summary.json` after basel
 Precondition: `.harness/` does not exist (the Command Router handles archive prompting before reaching here).
 
 1. Explore the repo and determine test/bootstrap commands.
-2. Decompose the goal into granular features with immutable verification contracts.
+2. Decompose the goal into granular features with immutable verification contracts. For each feature, invoke `/tdd-plan --feature-id <id>` (or `/tdd-plan "<description>"` if features.json isn't written yet) to produce the test list and seed the `verification` field. The skill emits JSON with `test_cases`, `implementation_skeleton`, and `verification_command` — use `verification_command` as `feature.verification.command`.
 3. Create:
    - `.harness/campaign.json`
    - `.harness/features.json`
@@ -193,13 +193,29 @@ Keep `progress.md` short. It is archival, not operational.
 
 ## Self-Test
 
-Always run self-test before completion:
+Always run self-test before completion. The canonical executor is the
+`/completion-verify` skill from `harness-discipline`.
 
-1. Run the campaign `test_command`.
-2. Run the active contract's `verification_commands`.
-3. Run the baseline smoke check (see Baseline Verification above).
-4. Update the checkpoint with the exact tests run.
-5. If the active contract has `manual_checks`, each must appear in `checkpoint.manual_checks_completed` before transitioning to done. Use `harness_checkpoint.py --manual-check-done "description"` to record each completed manual check.
+1. Run baseline smoke check (see Baseline Verification above) only if
+   `campaign.baseline_status == "failing"` or the prior session ended with
+   failures. Skip otherwise — `/completion-verify` covers the active contract.
+2. Run `/completion-verify --contract .harness/current-contract.json`.
+   Parse the JSON output:
+   - `status: "pass"` → proceed to Checkpoint and Completion.
+   - `status: "partial"` → manual checks remain. Each must be recorded via
+     `harness_checkpoint.py --manual-check-done "description"` before
+     completion can proceed.
+   - `status: "fail"` → see failure handling below.
+   - `status: "no_commands"` → contract is malformed; refresh it via
+     `harness_contract.py --feature-id <id>` and re-run.
+3. The contract's `verifications[]` results plus the `evidence_log` path
+   constitute the test record. Update the checkpoint's `tests_run` with the
+   list of commands actually executed.
+
+**Direct invocation (when `harness-discipline` isn't installed)**: fall
+back to running the contract's `verification_commands` inline and
+constructing the same JSON-shaped result by hand. This is a degraded mode;
+prefer the skill.
 
 If self-test fails:
 

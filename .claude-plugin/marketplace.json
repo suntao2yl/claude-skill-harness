@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Claude Code skills and plugins by suntao2yl",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "harness-plan",
       "source": "./plugins/harness-plan",
       "description": "Long-running task harness for multi-session development campaigns. Compact state, active feature contracts, deterministic transition scripts, risk-gated QA review.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "workflow",
       "tags": ["harness", "campaign", "multi-session", "workflow", "orchestration", "long-running-tasks"]
     }
