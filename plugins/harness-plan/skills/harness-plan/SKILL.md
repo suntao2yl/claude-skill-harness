@@ -79,9 +79,18 @@ For trivial features (≤30 LOC, single file/test) prefer flat-feature flow even
 - `/change-spec` — mini-RFC for change units (used in standard / heavy modes).
 - `caveman` + `git-guardrails` — recommended in autodrive.
 
-## Autodrive (one-paragraph)
+## Autodrive
 
-`/harness-plan autodrive on|off|status|reset`. When `.harness/autodrive.json.enabled == true`: after feature → done, commit and **end the session** (Stop hook spawns the next); never call `AskUserQuestion` — trip the fail marker instead; never run destructive scripts. Full protocol: [REFERENCE.md](REFERENCE.md#autodrive) + `resources/autodrive.md`.
+`/harness-plan autodrive on|off|status|reset`. Runs the campaign as a chain of one-feature-per-session `claude -p` spawns, with Stop hook deciding the next step.
+
+When `.harness/autodrive.json.enabled == true`, the in-session contract is non-negotiable:
+
+1. Implement exactly ONE feature, then `git add -A && git commit -m "feat(harness): complete F0XX - <title>"` and **end the response**. The Stop hook spawns the next.
+2. **Never call AskUserQuestion** — no human is present. If blocked (3 self-test retries hit, unresolvable state), run `harness_autodrive.py --fail --reason "<reason>"` and end.
+3. Never run destructive scripts (`harness_reset`, archive, force-push).
+4. The SessionStart hook injects the same contract as additionalContext when autodrive is enabled — treat that injection as authoritative even if this SKILL.md disagrees.
+
+A progress watchdog writes the fail marker if the `done` feature count doesn't advance for 2 consecutive decide ticks. Full protocol: [REFERENCE.md](REFERENCE.md#autodrive) + `resources/autodrive.md`.
 
 ## Change units
 

@@ -18,7 +18,10 @@ State file: .harness/autodrive.json
     "started_at": iso8601,
     "last_spawn_at": iso8601,
     "last_feature_id": str | null,
-    "campaign_base_commit": str | null
+    "campaign_base_commit": str | null,
+    "claude_binary": str | null,           # resolved at --enable time
+    "last_progress_counts": {"done": int, "total": int} | null,
+    "stall_count": int                     # consecutive ticks with no `done` progress
   }
 
 Failure marker: .harness/autodrive.fail (presence => Stop hook bails)
@@ -37,11 +40,13 @@ from pathlib import Path
 
 # Reuse harness_lib helpers so timestamp / IO conventions stay consistent.
 SCRIPTS_DIR = Path(__file__).resolve().parent
+SCRIPT_PATH = Path(__file__).resolve()
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 from harness_lib import utc_now  # type: ignore  # noqa: E402
 
 DEFAULT_MAX_ITERATIONS = 20
+STALL_LIMIT = 2  # consecutive decide ticks with no progress → fail marker
 
 
 def harness_dir(project_root: Path) -> Path:
@@ -130,10 +135,29 @@ def git_head_commit(project_root: Path) -> str | None:
     return None
 
 
+def find_git_root(start: Path) -> Path | None:
+    """Walk upward from `start` to find a directory containing `.git/`.
+
+    Returns None if no repo root is found within 20 parents.
+    """
+    current = start.resolve()
+    for _ in range(20):
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
+    return None
+
+
 # ---------- subcommand: enable / disable / status / reset / fail ----------
 
 def cmd_enable(project_root: Path, max_iterations: int) -> int:
     existing = load_state(project_root) or {}
+    # Persist the resolved claude binary at enable time, while the user's full
+    # PATH (volta/asdf/nvm/bun/etc.) is still in scope. The Stop hook spawns
+    # may run with a stripped PATH where shutil.which fails.
+    binary = find_claude_binary() or existing.get("claude_binary")
     state = {
         "enabled": True,
         "max_iterations": max_iterations or existing.get("max_iterations") or DEFAULT_MAX_ITERATIONS,
@@ -143,13 +167,16 @@ def cmd_enable(project_root: Path, max_iterations: int) -> int:
         "last_spawn_at": existing.get("last_spawn_at"),
         "last_feature_id": existing.get("last_feature_id"),
         "campaign_base_commit": existing.get("campaign_base_commit") or git_head_commit(project_root),
+        "claude_binary": binary,
+        "last_progress_counts": existing.get("last_progress_counts"),
+        "stall_count": existing.get("stall_count", 0),
     }
     save_state(project_root, state)
     # Clear stale fail marker on explicit re-enable.
     fp = fail_path(project_root)
     if fp.exists():
         fp.unlink()
-    append_log(project_root, f"autodrive enabled (max_iterations={state['max_iterations']})")
+    append_log(project_root, f"autodrive enabled (max_iterations={state['max_iterations']}, claude_binary={binary})")
     print(json.dumps(state, indent=2))
     return 0
 
@@ -203,7 +230,7 @@ def cmd_fail(project_root: Path, reason: str) -> int:
 
 # ---------- subcommand: decide (Stop-hook entry) ----------
 
-REVIEW_PROMPT = """The harness-plan campaign just finished all features. You are in a dedicated final-review session. Do exactly the following, then end:
+REVIEW_PROMPT = f"""The harness-plan campaign just finished all features. You are in a dedicated final-review session. Do exactly the following, then end:
 
 1. Run the /security-review skill against the diff between HEAD and the commit recorded at `.harness/autodrive.json` -> `campaign_base_commit`. If that field is missing, compare against `origin/HEAD` or just the campaign's first commit reachable via `git log --grep='harness'`.
 
@@ -223,16 +250,29 @@ REVIEW_PROMPT = """The harness-plan campaign just finished all features. You are
    git add .harness/review-report.md
    git commit -m "chore(harness): autodrive review report"
 
-5. Append one line to `.harness/autodrive.log`:
-   python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --mark-review-done
+5. Mark the review phase done by running:
+   python3 {SCRIPT_PATH} --project-root . --mark-review-done
 
 6. End your response. Don't pick another feature, don't ask questions — the user is not present.
 
 If anything in steps 1-4 fails irrecoverably, run:
-   python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . --fail --reason "review session: <short reason>"
+   python3 {SCRIPT_PATH} --project-root . --fail --reason "review session: <short reason>"
 then end."""
 
-CONTINUE_PROMPT = "/harness-plan"
+CONTINUE_PROMPT = f"""You are resuming a harness-plan campaign in AUTODRIVE mode. A human is NOT present.
+
+Read `.harness/autodrive.json` and `.harness/session-summary.json` to confirm state, then:
+
+1. Use the `harness-plan` skill to resume the active campaign. Pick the next pending feature and implement it.
+2. When that ONE feature transitions to `done`:
+     git add -u
+     git add .harness/
+     git commit -m "feat(harness): complete F0XX - <feature title>"
+   then end your response immediately. Do NOT pick a second feature in this session — the Stop hook will spawn the next.
+3. Never call AskUserQuestion. If you are genuinely blocked (3 self-test retries hit, unresolvable state, missing context), instead run:
+     python3 {SCRIPT_PATH} --project-root . --fail --reason "<short reason>"
+   then end your response.
+4. Never run destructive scripts (harness_reset, archive, force-push)."""
 
 
 def find_claude_binary() -> str | None:
@@ -242,25 +282,57 @@ def find_claude_binary() -> str | None:
     found = shutil.which("claude")
     if found:
         return found
-    # Common install locations as fallback.
-    for candidate in (
-        Path.home() / ".claude/local/claude",
+    # Probe common install locations. Stop hook subprocess may run with a
+    # stripped PATH (volta/asdf/nvm/bun/homebrew often missing under GUI launches),
+    # so check the canonical install dirs explicitly.
+    home = Path.home()
+    candidates = [
+        home / ".local/bin/claude",
+        home / ".claude/local/claude",
+        home / ".bun/bin/claude",
+        home / ".volta/bin/claude",
+        home / ".asdf/shims/claude",
         Path("/usr/local/bin/claude"),
         Path("/opt/homebrew/bin/claude"),
-    ):
+    ]
+    # nvm: scan node version dirs
+    nvm_dir = Path(os.environ.get("NVM_DIR") or (home / ".nvm"))
+    nvm_versions = nvm_dir / "versions/node"
+    if nvm_versions.exists():
+        try:
+            for ver in nvm_versions.iterdir():
+                candidates.append(ver / "bin/claude")
+        except Exception:
+            pass
+    for candidate in candidates:
         if candidate.exists():
             return str(candidate)
     return None
 
 
-def spawn_claude(project_root: Path, prompt: str) -> bool:
+def resolve_claude_binary(state: dict | None) -> str | None:
+    """Prefer the binary persisted at --enable time; fall back to discovery."""
+    if state:
+        cached = state.get("claude_binary")
+        if cached and Path(cached).exists():
+            return cached
+    return find_claude_binary()
+
+
+def spawn_claude(project_root: Path, prompt: str, state: dict | None = None) -> bool:
     """Detach a `claude -p <prompt>` process. Returns True on successful fork.
 
     Output goes to .harness/autodrive.log. The new process is detached via
     Popen(start_new_session=True), which calls setsid(2) so it survives the
     parent's exit independent of any shell.
+
+    cwd is set to the git repo root when one can be located, so the spawned
+    session loads project-level .claude/settings.json and plugin scopes the
+    same way an interactive `cd <repo> && claude` invocation would. The
+    harness root (where .harness/ lives) is added back via --add-dir so the
+    spawned session can still write to the campaign directory.
     """
-    binary = find_claude_binary()
+    binary = resolve_claude_binary(state)
     if not binary:
         append_log(project_root, "ERROR: cannot find `claude` binary on PATH; chain stopped")
         fail_path(project_root).write_text(f"{utc_now()}\nclaude binary not found\n", encoding="utf-8")
@@ -268,6 +340,13 @@ def spawn_claude(project_root: Path, prompt: str) -> bool:
 
     log = log_path(project_root)
     log.parent.mkdir(parents=True, exist_ok=True)
+
+    repo_root = find_git_root(project_root)
+    spawn_cwd = repo_root if repo_root else project_root
+    cmd = [binary, "--dangerously-skip-permissions"]
+    if repo_root and repo_root != project_root:
+        cmd += ["--add-dir", str(project_root)]
+    cmd += ["-p", prompt]
 
     try:
         log_fh = open(log, "a", encoding="utf-8")
@@ -277,14 +356,15 @@ def spawn_claude(project_root: Path, prompt: str) -> bool:
 
     try:
         subprocess.Popen(
-            [binary, "-p", prompt],
-            cwd=str(project_root),
+            cmd,
+            cwd=str(spawn_cwd),
             stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=log_fh,
             start_new_session=True,
             close_fds=True,
         )
+        append_log(project_root, f"spawn: cwd={spawn_cwd} binary={binary}")
         return True
     except Exception as exc:
         append_log(project_root, f"ERROR spawning claude: {exc}")
@@ -295,6 +375,15 @@ def spawn_claude(project_root: Path, prompt: str) -> bool:
             log_fh.close()
         except Exception:
             pass
+
+
+def _progress_done(counts: dict, features: list[dict]) -> int:
+    """Extract the 'completed' count from summary.progress_counts, with fallbacks."""
+    for key in ("done", "completed"):
+        v = counts.get(key)
+        if isinstance(v, int):
+            return v
+    return sum(1 for f in features if (f.get("status") or "") in ("done", "skipped"))
 
 
 def cmd_decide(project_root: Path) -> int:
@@ -323,47 +412,85 @@ def cmd_decide(project_root: Path) -> int:
         save_state(project_root, state)
         return 0
 
-    features = load_features(project_root)
-    summary = load_summary(project_root) or {}
-    counts = summary.get("progress_counts") or {}
-
-    everything_done = all_features_terminal(features) if features else False
-
     if phase == "review":
-        # If we're in review phase and the session ended, the review is complete.
+        # If we're in review phase and a session just ended, the review is complete.
         # mark-review-done normally sets phase=done. Belt-and-suspenders here.
         append_log(project_root, "decide: review session ended — marking phase=done")
         state["phase"] = "done"
         save_state(project_root, state)
         return 0
 
-    # phase == "feature"
+    features = load_features(project_root)
+    summary = load_summary(project_root) or {}
+    counts = summary.get("progress_counts") or {}
+
+    # H12: empty features.json is a setup error, not "nothing to do". The chain
+    # would otherwise loop forever asking Claude to "resume" a nonexistent plan.
+    if not features:
+        append_log(project_root, "decide: FAIL — features.json missing or empty; run INIT before autodrive")
+        fail_path(project_root).write_text(
+            f"{utc_now()}\nfeatures.json missing or empty — run INIT before enabling autodrive\n",
+            encoding="utf-8",
+        )
+        return 0
+
+    everything_done = all_features_terminal(features)
+
+    # H6: progress watchdog — if the `done` count hasn't moved for STALL_LIMIT
+    # consecutive ticks, something is wrong (spawned session stalled on a
+    # permission prompt, repeated on the same feature, etc.). Trip the fail
+    # marker so the chain stops cleanly instead of burning max_iterations.
+    done_now = _progress_done(counts, features)
+    total = counts.get("total") if isinstance(counts.get("total"), int) else len(features)
+    prev = state.get("last_progress_counts") or {}
+    stall_count = int(state.get("stall_count", 0))
+    if prev and prev.get("done") == done_now:
+        stall_count += 1
+    else:
+        stall_count = 0
+    state["last_progress_counts"] = {"done": done_now, "total": total}
+    state["stall_count"] = stall_count
+    if stall_count >= STALL_LIMIT and not everything_done:
+        append_log(
+            project_root,
+            f"decide: FAIL — no progress for {stall_count} consecutive iterations (done={done_now})",
+        )
+        fail_path(project_root).write_text(
+            f"{utc_now()}\nno progress for {stall_count} iterations; last done={done_now}\n",
+            encoding="utf-8",
+        )
+        save_state(project_root, state)
+        return 0
+
+    current_feature = summary.get("current_feature") or state.get("last_feature_id")
+
+    # M15: commit state ONLY after spawn succeeds. Previously iteration++ and
+    # phase=review were written before Popen, so a spawn failure left the
+    # state lying about what happened.
     if everything_done:
         append_log(project_root, "decide: all features terminal — spawning review session")
+        if not spawn_claude(project_root, REVIEW_PROMPT, state):
+            append_log(project_root, "decide: spawn failed — state left unchanged")
+            return 0
         state["phase"] = "review"
         state["iteration"] = iteration + 1
         state["last_spawn_at"] = utc_now()
         save_state(project_root, state)
-        if not spawn_claude(project_root, REVIEW_PROMPT):
-            return 0
         append_log(project_root, "decide: review session spawned")
         return 0
 
-    # Still features to do — spawn a continuation.
-    current_feature = (summary.get("current_feature") or
-                       (load_state(project_root) or {}).get("last_feature_id"))
     append_log(
         project_root,
         f"decide: continuing — iteration {iteration + 1}/{max_iters}, "
-        f"counts={counts.get('done', 0)}/{counts.get('total', '?')}, "
-        f"current={current_feature}",
+        f"counts={done_now}/{total}, current={current_feature}, stall={stall_count}",
     )
+    if not spawn_claude(project_root, CONTINUE_PROMPT, state):
+        append_log(project_root, "decide: spawn failed — state left unchanged")
+        return 0
     state["iteration"] = iteration + 1
     state["last_spawn_at"] = utc_now()
     state["last_feature_id"] = current_feature
     save_state(project_root, state)
-    if not spawn_claude(project_root, CONTINUE_PROMPT):
-        return 0
     append_log(project_root, "decide: continuation session spawned")
     return 0
 

@@ -49,18 +49,21 @@ When `.harness/autodrive.json` is present and `enabled: true`:
 
 1. Work on the active feature exactly as in normal mode.
 2. After `harness_summary.py` reports the feature as done:
-   - `git add -A`
+   - `git add -u` (staged tracked changes only — avoids folding unrelated untracked files into the feature commit)
+   - `git add .harness/` (pick up campaign state updates)
    - `git commit -m "feat(harness): complete F0XX - <feature title>"`
    - End the session. **Do not pick the next feature.**
 3. If self-test retries hit 3 (block condition) or the run encounters
    irrecoverable state, call:
 
    ```
-   python3 ${CLAUDE_SKILL_DIR}/scripts/harness_autodrive.py --project-root . \
+   python3 <absolute path to harness_autodrive.py> --project-root . \
      --fail --reason "<short reason>"
    ```
 
-   then end the session.
+   (The absolute path is embedded in the prompt the Stop hook sends — don't rely
+   on `$CLAUDE_SKILL_DIR` / `$CLAUDE_PLUGIN_ROOT` being set in the spawned session.)
+   Then end the session.
 
 The Stop hook handles everything else.
 
@@ -71,10 +74,30 @@ The Stop hook handles everything else.
 the new process is fully detached and survives the parent Claude's exit.
 stdin is `/dev/null`; stdout and stderr go to `.harness/autodrive.log`.
 
-The `claude` binary is located via `$CLAUDE_BINARY`, then `which claude`, then
-common install paths (`~/.claude/local/claude`, `/usr/local/bin/claude`,
-`/opt/homebrew/bin/claude`). If none exist, the controller writes a fail
-marker and stops the chain.
+The spawn command is:
+
+```
+<claude-binary> --dangerously-skip-permissions [--add-dir <harness-root>] -p "<prompt>"
+```
+
+- `--dangerously-skip-permissions` is required — the spawned session has no
+  stdin (DEVNULL) and cannot answer permission prompts. Without this flag the
+  session stalls on the first tool that needs confirmation and never reaches
+  its natural Stop, breaking the chain on iteration 1.
+- cwd is set to the git repo root (when locatable), so project-level
+  `.claude/settings.json` and plugin scopes resolve the same way an
+  interactive `cd <repo> && claude` would. `--add-dir <harness-root>` adds
+  back write access to the campaign subdirectory (e.g.
+  `.engineering/implementation/`).
+
+The `claude` binary path is captured at `--enable` time (while the user's full
+PATH is in scope) and persisted to `autodrive.json.claude_binary`. At spawn
+time the controller prefers that path over re-running discovery, because the
+Stop hook subprocess may run with a stripped PATH where shutil.which fails
+(volta/asdf/nvm/bun often missing under GUI launches). Fallback probes
+`~/.local/bin`, `~/.claude/local`, `~/.bun/bin`, `~/.volta/bin`,
+`~/.asdf/shims`, `/usr/local/bin`, `/opt/homebrew/bin`, and every
+`$NVM_DIR/versions/node/*/bin` entry before giving up.
 
 ## Review session prompt
 
@@ -124,9 +147,7 @@ config in place so you can investigate, then resume by deleting the marker.
   emits a final assistant message with no tool calls). It does not fire when
   the user kills the process. If you Ctrl-C out of an autodrive session, the
   chain pauses until you start the next one yourself.
-- **Working tree assumption.** `git add -A` assumes the user has not staged
-  unrelated changes. If you start an autodrive run with dirty unrelated edits,
-  they will be folded into the first feature commit.
+- **Working tree assumption.** The commit uses `git add -u && git add .harness/`, so only tracked changes plus campaign state get folded in. Any unrelated untracked files you had staged before autodrive are left alone; make sure that's what you want before enabling.
 - **One claude process at a time.** The detached spawn doesn't check whether
   another claude session is running. Don't manually start a second
   interactive session in the same project while autodrive is active.
@@ -140,5 +161,7 @@ config in place so you can investigate, then resume by deleting the marker.
 | Fail marker present | Stop hook exits 0. Logged. Chain stays stopped until marker is removed. |
 | `phase == "done"` | Stop hook exits 0. |
 | `iteration >= max_iterations` | Set phase=done, exit. Logged with "hit max_iterations". |
-| `claude` binary not found | Write fail marker, log error, exit. |
-| Subprocess exception during spawn | Log error, exit 0 (no marker). Next Stop tick will retry. |
+| `features.json` missing/empty | Write fail marker (`features.json missing or empty — run INIT…`), exit. Chain pauses for operator. |
+| No progress for 2 consecutive ticks | Progress watchdog trips. `done` count compared tick-to-tick; if unchanged and `stall_count >= 2`, write fail marker, exit. Prevents burning max_iterations on a stuck feature. |
+| `claude` binary not found | Write fail marker, log error, exit. `--enable` persists the resolved binary path to `autodrive.json.claude_binary`, so the Stop hook's stripped PATH no longer matters. |
+| Subprocess exception during spawn | Log error, exit 0. State is left unchanged (no iteration++) so a retry on the next Stop tick starts clean. |

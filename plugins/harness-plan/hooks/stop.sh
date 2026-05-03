@@ -14,9 +14,9 @@ set +e
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 # Find the nearest .harness/autodrive.json under PROJECT_DIR.
-# -maxdepth 4 covers the harness-engineering layout (.engineering/<phase>/.harness)
-# without scanning the whole repo.
-AUTODRIVE_JSON="$(find "$PROJECT_DIR" -maxdepth 4 -type f -path '*/.harness/autodrive.json' 2>/dev/null | head -n1)"
+# -maxdepth 6 covers deeper layouts (monorepo packages/<pkg>/.engineering/<phase>/.harness)
+# while still bounding the search.
+AUTODRIVE_JSON="$(find "$PROJECT_DIR" -maxdepth 6 -type f -path '*/.harness/autodrive.json' 2>/dev/null | head -n1)"
 if [ -z "$AUTODRIVE_JSON" ]; then
   exit 0
 fi
