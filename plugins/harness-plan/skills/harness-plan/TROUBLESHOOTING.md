@@ -24,6 +24,10 @@
 1. `harness_summary.py` regenerates it.
 2. If `campaign.json` is also missing, the campaign is corrupted — `/harness-plan reset` to archive and start fresh.
 
+## SessionStart hook error: "No such file or directory"
+
+The plugin registers its hooks via `hooks/hooks.json` using `${CLAUDE_PLUGIN_ROOT}`. The plugin framework resolves this automatically — **never** manually write hook entries into `~/.claude/settings.json`. If you see a path like `~/.claude/skills/harness/hooks/session-start.sh` in settings.json, delete that entire `hooks.SessionStart` entry. The plugin's own `hooks.json` is the sole source of truth.
+
 ## Autodrive chain stopped unexpectedly
 
 1. Inspect `.harness/autodrive.json` and the fail marker file — the marker holds the abort reason.

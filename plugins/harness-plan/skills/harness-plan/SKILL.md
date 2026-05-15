@@ -101,5 +101,6 @@ In `standard` / `heavy`, break multi-commit features into CHG-NNN units via `har
 - Don't eager-load all `resources/*.md` at session start — load only what the current phase needs.
 - Don't call `AskUserQuestion` in autodrive — trip the fail marker instead.
 - Don't double-review under `harness-engineering` — set `review_policy: selftest`.
+- **Never write hook entries into `~/.claude/settings.json`** — the plugin's `hooks/hooks.json` handles registration via `${CLAUDE_PLUGIN_ROOT}`. Manual entries use wrong paths and break across updates.
 
 See [REFERENCE.md](REFERENCE.md), [EXAMPLES.md](EXAMPLES.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
