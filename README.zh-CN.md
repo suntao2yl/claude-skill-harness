@@ -1,255 +1,100 @@
-# claude-skill-harness
+# Harness
 
-[English](README.md) | [中文](README.zh-CN.md)
+Harness 3.2 只暴露一个同名 Codex plugin 与 skill：`$harness`。它把原 harness 的持久化
+合同、制品、风险门和跨 task 交接，与 Codex 原生 PDCA 执行环合并为一条工作流。
 
-用于管理长周期、多会话开发任务的 Claude Code skill。
+不再区分被动账本模式和 PDCA companion。Ultra 负责 Plan，High 负责 Do，全新的 Max
+负责 Check，确定性代码负责 Act；项目内 `.harness/` 账本保存批准范围与精确交接状态。
 
-思路来源仍然是 Anthropic Engineering 关于长任务 harness 的两篇文章：
-- [Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps)
-- [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+## 它保存什么
 
-## v2 的核心变化
+- 已确认的交付目标和验收标准；
+- 不允许静默漂移的验收标准；
+- 已完成工作、遗留问题和一个明确的下一步；
+- 验收证据和可审计的交接摘要。
 
-`/harness-plan` 的外部命令保持不变，但内部恢复与交接逻辑改成了：
+适合需要明确验收合同、独立复核或跨 task 连续性的交付。普通的一次性工作仍可直接使用
+Codex，不必引入 harness。
 
-- 用紧凑的机器状态替代自由文本断点
-- 每个进行中 feature 只有一个 `current-contract.json`
-- 用 `session-summary.json` 作为默认恢复入口
-- 用确定性的 Python 脚本处理状态变更
-- 按风险决定是否进入完整 QA
-- 通过 `${CLAUDE_SKILL_DIR}` 使脚本路径可移植——不依赖安装位置
-- 新增 `harness_reset.py` 实现确定性的 campaign 归档
-- 命令路由明确：`/harness-plan "goal"` → INIT，`/harness-plan` → RESUME
-- `/harness-plan focus` 切换前检查是否有 in_progress 冲突
-- 启动时只读取活跃 feature 条目，而非整个 `features.json`
-- `session-protocol.md` 合并到 SKILL.md，减少每次会话的 token 开销
-- 重试升级：`selftest_retries` 计数器连续失败 3 次后自动 block
-- 会话新鲜度信号：`checkpoint_writes`、已完成步骤数、会话内完成 feature 数触发换会话建议
-- 并行子任务指导：在单个 feature 内使用 Agent tool 并行处理独立子任务
-- 默认自动推进：仅 INIT 计划审批、破坏性操作和 QA 审查需要人工确认
-- scope drift 检测：checkpoint 时检查 `files_touched` 是否越过 `scope_out` 边界
-- quick-verify：`harness_checkpoint.py --quick-verify` 在实现阶段提前跑 `test_command`，尽早发现回归
-- 结构化失败记录：checkpoint 中新增 `last_failure` 对象（command, error_summary, affected_files, timestamp）
-- 会话交接上下文：session-summary 新增 `session_id`、`session_step_count`、`handoff_reason`，支持跨会话连续性
-- 手动检查追踪：`--manual-check-done` 记录已完成的手动检查项
-- 契约命令历史：`command_history` 记录验证命令的变更轨迹（含时间戳）
-- 状态机新增 `backlog` 状态，支持转换到 `pending`、`in_progress`、`skipped`
-- 运行时平台检测：`detect_platform()` / `skill_home()` 支持 Codex 环境兼容
+## 在 Codex 中安装
 
-## 关键文件
+```bash
+codex plugin marketplace add /absolute/path/to/harness
+codex plugin add harness@harness-marketplace
+```
+
+安装后新建 Codex task。这个 skill 只能显式调用：
 
 ```text
-.harness/
-├── campaign.json
-├── features.json
-├── current-contract.json
-├── session-summary.json
-├── features-schema.json
-├── contract-schema.json
-├── session-summary-schema.json
-└── progress.md
+$harness 启动已经确认的交付
+$harness status
+$harness validate
+$harness resume
 ```
 
-## 状态文件说明
-
-### `campaign.json`
-
-保存 campaign 元数据与默认策略：
-
-- `bootstrap_command`
-- `setup_command`
-- `default_review_policy`
-- `baseline_status`
-- `last_session_commit`
-
-### `features.json`
-
-保存 feature 列表、不可变的 `verification`，以及结构化 `checkpoint`。
-每个 feature 还包含 `blocked_history`（带时间戳的阻塞/解除记录，上限 10 条）和 `archived_contract`（feature 完成时保存的契约快照）。
-
-### `current-contract.json`
-
-当前激活 feature 的执行契约：
-
-- `feature_id`
-- `goal`
-- `scope_in`
-- `scope_out`
-- `verification_claims`
-- `verification_commands`
-- `manual_checks`
-- `review_policy`
-- `execution_context` — 验证命令的工作目录和超时设置
-- `command_history` — 验证命令变更的时间戳记录
-
-### `session-summary.json`
-
-新会话和 hook 默认读取的恢复摘要：
-
-- campaign goal 与 mode
-- 当前 feature
-- 进度计数
-- 下一步动作
-- 已知失败项
-- 环境状态
-- `session_id` 和 `session_step_count` 用于会话边界检测
-- `handoff_reason` — 上一会话结束原因（freshness, blocked, completed, interrupted）
-
-## 内置脚本
+插件不注册 hook，也不启动后台进程。安装包由 canonical skill 生成，并通过以下命令检查
+两者是否漂移：
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_validate.py
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_summary.py
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_pick_next.py
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_transition.py --feature-id F007 --to in_progress
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --next-step "..."
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --quick-verify
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_checkpoint.py --feature-id F007 --manual-check-done "检查描述"
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_contract.py --feature-id F007 --update-command "旧命令" "新命令"
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_reset.py --label "phase-1"
+python3 scripts/sync_codex_plugin.py --check
 ```
 
-这些脚本只读写 `.harness/`，用于替代手工修改 JSON。
-其中 `harness_contract.py` 和 `harness_checkpoint.py` 只允许作用于当前激活且处于 `in_progress` 的 feature，`harness_transition.py` 会拒绝创建第二个活跃 feature。
+## 合并后的 Codex 原生工作流
 
-脚本关键行为：
-- `harness_validate.py` 检测 git drift（HEAD 与上次验证提交的差异）以及循环依赖和悬空依赖。
-- `harness_checkpoint.py` 在未显式提供时自动从 `git diff` 提取 `files_touched`。`--quick-verify` 在写入前跑测试。`--selftest-retry` / `--failure-command` / `--failure-summary` 记录结构化失败信息。`--manual-check-done` 标记手动检查完成。
-- `harness_contract.py` 支持 `--update-command` 更新验证命令并记录变更历史。
-- `harness_transition.py` 在 feature 完成时将契约归档到 feature 记录中（而非删除），阻塞时追加带时间戳的条目到 `blocked_history`。支持 `backlog` 状态。
-- `harness_reset.py` 将整个 campaign 归档到 `.harness/archive/<timestamp>_<label>/`，清理 `.harness/` 以便重新 INIT。
+`$harness` 只能显式调用，并运行唯一的 contract-to-Act 工作流：
 
-## 工作流
+- Plan 使用 Ultra、只读的原生 agent，并完成当前交付所需的需求澄清、设计、架构、范围和风险分析；
+- Do 使用 High、workspace-write 的唯一写 agent；
+- Check 使用全新的 Max、只读 agent，完成合同要求的测试、评审、发布就绪和精确 revision 验收；
+- Act 不调用模型，由确定性代码决定完成、回 Do、重做 Plan 或阻塞。
 
-```text
-INIT -> PICK -> 生成 contract -> 实现 -> 自测 -> 按需 QA -> checkpoint -> 完成
-```
+批准合同初始化后立即进入 fail-closed schema v2；schema v1 只作为初始化或旧状态迁移的
+中间态。每个阶段记录结构化项目内 artifact，并通过 checkpoint sequence 做 CAS 防并发
+覆盖。完整约定见 [Harness skill](skills/harness/SKILL.md)。
 
-恢复时优先级：
+## 状态与安全边界
 
-1. `session-summary.json`
-2. `current-contract.json`
-3. 当前 feature 的 `checkpoint`
-4. 必要时再读 `progress.md` 最近几行
+所有活动状态都位于 `<project>/.harness/`；显式旧版迁移还会在旁边创建审计备份。
+`status`、`validate` 和 `resume` 只读；只有覆盖全部验收项的独立 Check 加确定性 Act，才能
+完成验收。
 
-## 审查策略
+初始化后，验收标准即被冻结，3.0 命令不提供改写入口。修改验收标准意味着创建新的、
+经用户确认的验收约定；替换前必须把原账本保留为审计记录。
 
-- `selftest`: 只跑本地验证
-- `qa`: 先跑本地验证，再启动独立 reviewer agent
+具体用法见 [USAGE.md](USAGE.md)，操作约定见 [operations.md](docs/operations.md)，
+结构见 [architecture.md](docs/architecture.md)，设计约束见
+[principles.md](docs/principles.md)。
 
-默认对 UI、鉴权、支付、迁移、并发、外部集成类 feature 使用 `qa`；其他低风险 feature 默认 `selftest`。
+## 从 2.x 迁移
 
-## SessionStart hook
+3.0 有意移除了 `full` 生命周期模式以及全部 `.engineering/` 生命周期行为。
 
-安装 plugin 后会自动注册 SessionStart hook,在新会话启动时注入紧凑状态:
+| 2.x 状态或调用 | 3.0 处理方式 |
+| --- | --- |
+| 已有 2.x `.harness/` | 执行 `resume --migrate`。迁移会完整归档旧目录并创建干净的活动账本，可安全重复执行；普通 `status` 和 `resume` 不会暗中迁移。 |
+| 同时存在 `.engineering/` 和 `.harness/` | 迁移 `.harness/`；3.0 忽略旧关联。另一个目录仅在项目确认不再需要时归档。 |
+| 只有带旧 campaign 文件的 `.engineering/implementation/.harness/` | 执行 `resume --migrate`；这是唯一支持自动识别的嵌套旧状态位置。 |
+| 其他 `.engineering/` 生命周期状态，且没有可识别的旧 `.harness/` | 重新审查仍然有效的验收标准，再初始化新账本；不做自动转换。 |
+| `$harness-engineering full ...` | 改用 `$harness`；按交付规模把必要的生命周期分析折叠到 Plan。 |
+| `$harness-engineering campaign ...` | 改用 `$harness`；批准合同与 PDCA 事件历史替代独立 campaign 状态。 |
 
-- 目标
-- 进度计数
-- 当前 feature
-- review policy
-- 环境状态（baseline failing 时显示警告）
-- 上次会话日期
-- 一行 next step
-- 已知失败项（最多 5 条）
-- 当前 feature 上次 checkpoint 的 open issues（最多 5 条）
-- 上一会话的 `handoff_reason`（freshness, blocked, completed, interrupted）
-- 上次自测失败详情（如有）
+plugin 与 skill 统一使用 `harness` 名称，`$harness` 是唯一调用入口。3.2 不恢复第二套
+固定七阶段引擎，而是把这些职责合并进 contract-to-Act 主循环。原 `harness-plan` 源码
+仍可从仓库历史中恢复，不再由任何 marketplace 发布。
 
-## 跨会话自动推进(autodrive)
+迁移不会把旧 `done` 标签直接升级为已验收，只会把它保留为结果未知的历史声明；必须补充
+当前且绑定源码版本的成功证据后，才能确认完成。
 
-`/harness-plan autodrive on` 让 campaign 一次只跑一个 feature 后就结束当前
-会话,Stop hook 自动 spawn 新的 `claude -p` 会话推下一个,直到所有 feature
-完成或触上限。最后一个 feature 完成后,系统起一个专门的 review session,
-跑 `/security-review` + 4 个并行 reviewer subagent,产出
-`.harness/review-report.md`。
+## Claude 兼容
+
+`.claude-plugin/` 与 `./install.sh --claude` 向 Claude 兼容宿主提供持久合同与交接表面；
+Ultra/High/Max agent 执行环仍只在 Codex 中运行。
+
+## 校验本仓库
 
 ```bash
-/harness-plan autodrive on        # 默认 max_iterations=20
-/harness-plan autodrive status
-/harness-plan autodrive off       # 下一次 Stop hook 触发时退出链
-/harness-plan autodrive reset     # 删除配置 + fail marker
+python3 /path/to/skill-creator/scripts/quick_validate.py skills/harness
+python3 scripts/sync_codex_plugin.py --check
+python3 /path/to/plugin-creator/scripts/validate_plugin.py plugins/harness
+python3 -m unittest discover -s tests -v
 ```
-
-护栏:
-- 默认禁用。`--max-iterations N` 限制总 spawn 数。
-- `.harness/autodrive.fail` 标记文件存在即终止链。
-- autodrive 模式下禁止 `AskUserQuestion`;需要澄清时调
-  `harness_autodrive.py --fail --reason "..."` 触失败标记。
-
-完整协议见 `resources/autodrive.md`。
-
-### autodrive 推荐搭配
-
-无人值守跑 campaign 时,从
-[`harness-discipline`](https://github.com/suntao2yl/claude-skill-discipline)
-额外装两个:
-
-- **`caveman`** —— 超压缩输出模式,token 用量降 ~75%,技术内容无损,
-  日志事后审阅仍可读。
-- **`git-guardrails`** —— PreToolUse hook,在 Claude 执行前拦截
-  `git push` / `reset --hard` / `clean -fd` / `branch -D` /
-  `checkout .` / `restore .`。无人审 tool call 时的最后一道防线。
-
-两者各装一次,所有 autodrive session 自动生效。
-
-## Change units(CHG-NNN)
-
-standard / heavy 模式下,大 feature 可以拆成多个 reviewable 的 change
-unit,每个有���己的 `proposed → speccing → verifying → archived` 生命
-周期。父 feature 只有在所有 change unit 都 `archived` 后才能进入 `done`。
-
-```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
-    propose --feature-id F003 --title "Add CSV parser"
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
-    to-spec --change-id CHG-001 --spec-path .harness/changes/CHG-001/spec.md
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
-    to-verify --change-id CHG-001 --verify-evidence .harness/changes/CHG-001/verify.json
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
-    archive --change-id CHG-001 --files-touched src/csv.py
-python3 ${CLAUDE_SKILL_DIR}/scripts/harness_change.py --project-root . \
-    status [--feature-id F003]
-```
-
-lite 模式保持原扁平 flow — change unit 是可选,仅在带来收益时才用。
-
-## harness-discipline 集成
-
-装了 [`harness-discipline`](https://github.com/suntao2yl/harness-discipline)
-后,harness-plan 把三件事委托给它:
-
-| 操作 | Skill | 调用时机 |
-|---|---|---|
-| 测试优先计划 + verification command | `/tdd-plan` | INIT,每个 feature |
-| 跑 verification commands 返回结构化 JSON | `/completion-verify` | Self-Test |
-| 为 change unit 写 mini-RFC | `/change-spec` | propose 后、实现前 |
-
-未装 discipline 时,harness-plan 回退到内联验证(结论一致,只是 evidence
-结构化程度差一点)。discipline 是推荐但非必需。
-
-## 安装
-
-### Claude Code
-
-```bash
-# 先添加 marketplace，再安装 plugin
-/plugin marketplace add suntao2yl/claude-skill-harness
-/plugin install harness-plan@suntao-skills
-```
-
-安装完成后，Claude Code 会暴露真正的 slash command：`/harness-plan`；该命令会路由到插件内置的 `harness-plan` skill。
-
-### Codex
-
-```bash
-python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo suntao2yl/claude-skill-harness \
-  --path plugins/harness-plan/skills/harness-plan
-```
-
-安装完成后请重启 Codex，新 skill 才会出现在技能列表中。
-
-## License
-
-MIT

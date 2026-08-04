@@ -1,0 +1,6 @@
+interface:
+  display_name: "Harness"
+  short_description: "Contract-to-Act engineering delivery loop"
+  default_prompt: "Use $harness to start or resume the unified contract-to-Act engineering workflow for this repository."
+policy:
+  allow_implicit_invocation: false

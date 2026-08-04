@@ -1,2 +1,34 @@
-__pycache__/
+# macOS
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+
+# Validation workspaces (dogfooding artifacts, not source)
+validation/*/.engineering/
+validation/*/.engineering-archive/
+validation/*/.harness/
+validation/*/.pytest_cache/
+validation/*/__pycache__/
+
+# but keep source code inside validation projects
+!validation/*/lc.py
+!validation/*/tests/
+!validation/*/project.godot
+!validation/*/scenes/
+!validation/*/scripts/
+
+# Legacy 2.x lifecycle state retained only for explicit migration tests/recovery
+/.engineering/
+/.engineering-archive/
+
+# Local pre-merge source snapshot; canonical history already preserves the old plugin.
+/legacy/

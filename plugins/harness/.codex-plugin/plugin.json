@@ -1,0 +1,38 @@
+{
+  "name": "harness",
+  "version": "3.2.0+codex.20260804050241",
+  "description": "Unified contract-to-Act engineering workflow with Ultra Plan, High Do, Max Check, and deterministic Act.",
+  "author": {
+    "name": "suntao2yl",
+    "url": "https://github.com/suntao2yl"
+  },
+  "homepage": "https://github.com/suntao2yl/claude-skill-harness",
+  "repository": "https://github.com/suntao2yl/claude-skill-harness",
+  "license": "MIT",
+  "keywords": [
+    "delivery-ledger",
+    "acceptance",
+    "checkpoint",
+    "handoff",
+    "cross-task",
+    "pdca",
+    "multi-agent"
+  ],
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Harness",
+    "shortDescription": "One contract-to-Act engineering workflow",
+    "longDescription": "Merge durable engineering contracts, artifacts, gates, and cross-task handoff into one fail-closed Codex-native loop where Ultra plans, High implements, Max checks, and deterministic code applies Act.",
+    "developerName": "suntao2yl",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Validation"
+    ],
+    "defaultPrompt": [
+      "Use $harness to start an approved engineering delivery through Ultra Plan, High Do, Max Check, and deterministic Act.",
+      "Use $harness to inspect, validate, or resume the current contract-to-Act delivery."
+    ],
+    "brandColor": "#0F766E"
+  }
+}
